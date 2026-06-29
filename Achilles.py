@@ -280,7 +280,7 @@ for mode_key, mode_scores in scores.items():
 
 """XCEBRA"""
 
-!pip install captum
+# !pip install captum
 
 import cebra
 import cebra.attribution
