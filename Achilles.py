@@ -1,16 +1,16 @@
-!git clone https://github.com/AdaptiveMotorControlLab/CEBRA.git
-!pip install poyo datasets
+# !git clone https://github.com/AdaptiveMotorControlLab/CEBRA.git
+# !pip install poyo datasets
 
-!unzip -o base.zip
+# !unzip -o base.zip
 
-!cp base.py CEBRA/cebra/solver/base.py
+# !cp base.py CEBRA/cebra/solver/base.py
 
-!cp cebra.py CEBRA/cebra/integrations/sklearn/cebra.py
-!cp cebra.py CEBRA/cebra/cebra.py
+# !cp cebra.py CEBRA/cebra/integrations/sklearn/cebra.py
+# !cp cebra.py CEBRA/cebra/cebra.py
 
-!rm base.py cebra.py
+# !rm base.py cebra.py
 
-!pip install literate_dataclasses
+# !pip install literate_dataclasses
 
 with open("CEBRA/cebra/solver/base.py", "a") as f:
     f.write("\nclass AuxiliaryVariableSolver(Solver):\n    pass\n")
