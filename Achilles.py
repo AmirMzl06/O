@@ -52,14 +52,15 @@ def setup_seed(seed: int = 42):
 def load_local_rat_dataset(name, dataset_dir="dataset"):
     path = os.path.join(dataset_dir, f"{name}.jl")
     data = joblib.load(path)
-    spikes = data["spikes"].astype(np.float32)  
+    spikes = data["spikes"].astype(np.float32)   
     position = data["position"].astype(np.float32)
 
     if position.ndim == 1:
         position = position[:, None]
 
+    print(f"[{name}] spikes shape: {spikes.shape}, position shape: {position.shape}")
     return spikes, position
-
+    
 
 for training_mode, adv in [("clean", False), ("adversarial", True)]:
     epochs = 500
@@ -79,13 +80,13 @@ for training_mode, adv in [("clean", False), ("adversarial", True)]:
             adv_steps=10,
             attack_norm="l2",
             jacobian_weight=0.01,
-            adv_aggregate=True,
         )
 
         spikes, position = load_local_rat_dataset(name, dataset_dir="dataset")
         train_idx = int(0.8 * len(spikes))
         train_data = spikes[:train_idx]
-        train_continuous_label = position[:train_idx, :2] if position.shape[1] >= 2 else position[:train_idx]
+
+        train_continuous_label = position[:train_idx, :2]
 
         setup_seed(0)
 
