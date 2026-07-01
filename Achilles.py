@@ -64,15 +64,15 @@ print("CEBRA:", cebra.__version__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 rats = [
-    "achilles"
-    # "buddy",
-    # "cicero",
-    # "gatsby"
+    "achilles",
+    "buddy",
+    "cicero",
+    "gatsby"
 ]
 
 adv_epsilon = 0.5
 
-N_FAKE = 8
+N_FAKE = 10
 
 RESULT_DIR = "results"
 os.makedirs(RESULT_DIR, exist_ok=True)
@@ -155,8 +155,8 @@ def add_fake_neurons(train_data, test_data, key):
 
     fake_neuron_indices[key] = positions
 
-    mu = train_data.mean()
-    sigma = train_data.std()
+    mu = 0#train_data.mean()
+    sigma =1 #train_data.std()
 
     train_data = insert_fake_at_positions(
         train_data,
