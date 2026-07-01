@@ -1,7 +1,7 @@
 from torch_brain.datasets import PerichMillerPopulation2018
 
 PerichMillerPopulation2018.download(
-    root="data"
+    root="perich_data"
 )
 
 from torch_brain.datasets import PerichMillerPopulation2018
