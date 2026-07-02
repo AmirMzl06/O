@@ -70,7 +70,7 @@ rats = [
     "gatsby"
 ]
 
-adv_epsilon = 0.5
+adv_epsilon = 0.1 #0.5
 
 N_FAKE = 10
 
@@ -109,13 +109,7 @@ def load_local_rat_dataset(name, dataset_dir="dataset"):
     return spikes, position
 
 
-def insert_fake_at_positions(
-    x,
-    positions,
-    rng,
-    mu,
-    sigma,
-):
+def insert_fake_at_positions(x,positions,rng,mu,sigma):
 
     n_total = x.shape[1] + len(positions)
 
@@ -140,11 +134,8 @@ def insert_fake_at_positions(
 
 
 def add_fake_neurons(train_data, test_data, key):
-
     rng = np.random.default_rng(0)
-
     n_real = train_data.shape[1]
-
     positions = np.sort(
         rng.choice(
             n_real + N_FAKE,
@@ -152,12 +143,9 @@ def add_fake_neurons(train_data, test_data, key):
             replace=False,
         )
     )
-
     fake_neuron_indices[key] = positions
-
     mu = 0#train_data.mean()
     sigma =1 #train_data.std()
-
     train_data = insert_fake_at_positions(
         train_data,
         positions,
@@ -165,7 +153,6 @@ def add_fake_neurons(train_data, test_data, key):
         mu,
         sigma,
     )
-
     test_data = insert_fake_at_positions(
         test_data,
         positions,
@@ -173,22 +160,16 @@ def add_fake_neurons(train_data, test_data, key):
         mu,
         sigma,
     )
-
     return train_data, test_data, positions
 
 
 def get_torch_model(model):
-
     torch_model = model.solver_.model
-
     torch_model.split_outputs = False
-
     torch_model.to(device)
     torch_model.eval()
-
     return torch_model
-
-
+    
 def compute_decoder_score(
     model,
     train_data,
@@ -207,37 +188,24 @@ def compute_decoder_score(
     ).to(device)
 
     train_label = torch.tensor(
-
         train_label,
-
         dtype=torch.float32,
-
     ).to(device)
 
     test_label = torch.tensor(
-
         test_label,
-
         dtype=torch.float32,
-
     ).to(device)
 
     decoder = TwoLayerMLP(
-
         input_dim=48,
-
         output_dim=2,
-
     )
 
     setup_seed(0)
-
     decoder.fit(
-
         train_latent,
-
         train_label,
-
     )
 
     with torch.no_grad():
@@ -250,7 +218,6 @@ def compute_decoder_score(
     return r2
 
 def compute_attribution(
-
     model,
     neural,
     batch_size=256,
@@ -259,29 +226,18 @@ def compute_attribution(
 ):
 
     neural = torch.from_numpy(neural).float().to(device)
-
     neural.requires_grad_(True)
-
     torch_model = get_torch_model(model)
-
     method = cebra.attribution.init(
-
         name="jacobian-based-batched",
-
         model=torch_model,
-
         input_data=neural,
-
         output_dimension=torch_model.num_output,
-
         num_samples=num_samples,
-
     )
 
     attribution = method.compute_attribution_map(
-
         batch_size=batch_size
-
     )
 
     jf = np.abs(
@@ -296,43 +252,117 @@ def compute_attribution(
     torch.cuda.empty_cache()
 
     return {
-
         "jf": jf,
-
         "jfinv": jfinv,
-
     }
 
 
 def binary_maps(jf, jfinv):
-
     jf_bin = (
-
         zscore(jf, axis=None) > 0
-
     ).astype(np.int32)
-
     jfinv_bin = (
-
         zscore(jfinv, axis=None) > 0
-
     ).astype(np.int32)
-
+    
     return jf_bin, jfinv_bin
 
+def save_comparison_plots(rat, results, fake_positions):
+    save_dir = os.path.join(RESULT_DIR, rat)
+    os.makedirs(save_dir, exist_ok=True)
+
+    fig, axs = plt.subplots(1, 2, figsize=(14, 5))
+
+    im0 = axs[0].imshow(results["clean"]["jfinv"], aspect="auto")
+    axs[0].set_title(f"{rat} — clean — JF-inv")
+    axs[0].set_xlabel("Input neurons")
+    axs[0].set_ylabel("Latent dims")
+    plt.colorbar(im0, ax=axs[0])
+
+    im1 = axs[1].imshow(results["adv"]["jfinv"], aspect="auto")
+    axs[1].set_title(f"{rat} — adversarial — JF-inv")
+    axs[1].set_xlabel("Input neurons")
+    axs[1].set_ylabel("Latent dims")
+    plt.colorbar(im1, ax=axs[1])
+
+    for fpos in fake_positions:
+        axs[0].axvline(fpos, color="red", linestyle="--", linewidth=0.8)
+        axs[1].axvline(fpos, color="red", linestyle="--", linewidth=0.8)
+
+    plt.suptitle(f"{rat} — JF-inv attribution (raw)", fontsize=13)
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "jfinv_raw.png"), dpi=300)
+    plt.close()
+
+    jfinv_clean_bin = (zscore(results["clean"]["jfinv"], axis=None) > 0).astype(int)
+    jfinv_adv_bin = (zscore(results["adv"]["jfinv"], axis=None) > 0).astype(int)
+
+    fig, axs = plt.subplots(1, 2, figsize=(14, 5))
+
+    im0 = axs[0].imshow(
+        jfinv_clean_bin, aspect="auto", cmap="Greys", vmin=0, vmax=1)
+    axs[0].set_title(f"{rat} — clean — JF-inv (binary, z>0)")
+    axs[0].set_xlabel("Input neurons")
+    axs[0].set_ylabel("Latent dims")
+    plt.colorbar(im0, ax=axs[0])
+
+    im1 = axs[1].imshow(
+        jfinv_adv_bin, aspect="auto", cmap="Greys", vmin=0, vmax=1)
+    axs[1].set_title(f"{rat} — adversarial — JF-inv (binary, z>0)")
+    axs[1].set_xlabel("Input neurons")
+    axs[1].set_ylabel("Latent dims")
+    plt.colorbar(im1, ax=axs[1])
+
+    for fpos in fake_positions:
+        axs[0].axvline(fpos, color="red", linestyle="--", linewidth=0.8)
+        axs[1].axvline(fpos, color="red", linestyle="--", linewidth=0.8)
+
+    plt.suptitle(f"{rat} — JF-inv attribution (binary, z-score>0)", fontsize=13)
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "jfinv_binary.png"), dpi=300)
+    plt.close()
+
+    fake_clean = results["clean"]["jfinv"][:, fake_positions]
+    fake_adv = results["adv"]["jfinv"][:, fake_positions]
+
+    fake_clean_bin = (zscore(fake_clean, axis=None) > 0).astype(int)
+    fake_adv_bin = (zscore(fake_adv, axis=None) > 0).astype(int)
+
+    fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+
+    im0 = axs[0].imshow(
+        fake_clean_bin, aspect="auto", cmap="Greys", vmin=0, vmax=1)
+    axs[0].set_title(f"{rat} — clean — fake neurons")
+    axs[0].set_xlabel(f"Fake neuron index: {list(fake_positions)}")
+    axs[0].set_ylabel("Latent dims")
+    plt.colorbar(im0, ax=axs[0])
+
+    im1 = axs[1].imshow(
+        fake_adv_bin, aspect="auto", cmap="Greys", vmin=0, vmax=1)
+    axs[1].set_title(f"{rat} — adversarial — fake neurons")
+    axs[1].set_xlabel(f"Fake neuron index: {list(fake_positions)}")
+    axs[1].set_ylabel("Latent dims")
+    plt.colorbar(im1, ax=axs[1])
+
+    plt.suptitle(
+        f"{rat} — JF-inv fake neurons (binary, z-score>0)\n"
+        f"positions: {list(fake_positions)}",
+        fontsize=12,
+    )
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "fake_binary.png"), dpi=300)
+    plt.close()
+
+    print(f"[{rat}] Figures saved -> {save_dir}/")
+    print(f"       jfinv_raw.png | jfinv_binary.png | fake_binary.png")
+    
 
 def save_heatmaps(
-
     rat,
-
     mode,
-
     result,
-
     fake_positions,
-
 ):
-
     save_dir = os.path.join(
         RESULT_DIR,
         rat,
@@ -343,24 +373,16 @@ def save_heatmaps(
         exist_ok=True,
     )
     ########################################################
-
     fig, axs = plt.subplots(2,2,figsize=(12,10),)
-
     im = axs[0,0].imshow(
         result["jf"],
         aspect="auto",
     )
-
     axs[0,0].set_title("JF")
-
     plt.colorbar(im, ax=axs[0,0])
-
     im = axs[0,1].imshow(
-
         result["jfinv"],
-
         aspect="auto",
-
     )
 
     axs[0,1].set_title("JF-inv")
@@ -376,35 +398,22 @@ def save_heatmaps(
     )
 
     im = axs[1,0].imshow(
-
         jf_bin,
-
         aspect="auto",
-
         cmap="Greys",
-
         vmin=0,
-
-        vmax=1,
-
-    )
+        vmax=1,)
 
     axs[1,0].set_title("JF binary")
 
     plt.colorbar(im, ax=axs[1,0])
 
     im = axs[1,1].imshow(
-
         jfinv_bin,
-
         aspect="auto",
-
         cmap="Greys",
-
         vmin=0,
-
         vmax=1,
-
     )
 
     axs[1,1].set_title("JF-inv binary")
@@ -413,45 +422,13 @@ def save_heatmaps(
 
     for f in fake_positions:
 
-        axs[0,1].axvline(
+        axs[0,1].axvline(f,color="red",linestyle="--",linewidth=0.8,)
 
-            f,
-
-            color="red",
-
-            linestyle="--",
-
-            linewidth=0.8,
-
-        )
-
-        axs[1,1].axvline(
-
-            f,
-
-            color="red",
-
-            linestyle="--",
-
-            linewidth=0.8,
-
-        )
+        axs[1,1].axvline(f,color="red",linestyle="--",linewidth=0.8,)
 
     plt.tight_layout()
 
-    plt.savefig(
-
-        os.path.join(
-
-            save_dir,
-
-            "heatmaps.png",
-
-        ),
-
-        dpi=300,
-
-    )
+    plt.savefig(os.path.join(save_dir,"heatmaps.png",),dpi=300,)
 
     plt.close()
 
@@ -459,124 +436,68 @@ def save_heatmaps(
 
     fake = result["jfinv"][:, fake_positions]
 
-    fake_bin = (
-
-        zscore(fake, axis=None) > 0
-
-    ).astype(np.int32)
-
+    fake_bin = (zscore(fake, axis=None) > 0).astype(np.int32)
     plt.figure(
-
         figsize=(6,4),
-
     )
 
     plt.imshow(
-
         fake_bin,
-
         aspect="auto",
-
         cmap="Greys",
-
         vmin=0,
-
-        vmax=1,
-
-    )
+        vmax=1,)
 
     plt.colorbar()
 
-    plt.title(
-
-        "Fake neurons"
-
-    )
-
+    plt.title("Fake neurons")
     plt.tight_layout()
 
     plt.savefig(
 
-        os.path.join(
-
-            save_dir,
-
-            "fake_neurons.png",
-
-        ),
-
-        dpi=300,
-
-    )
+        os.path.join(save_dir,"fake_neurons.png",),dpi=300,)
     plt.close()
-    print(
-        f"Figures saved -> {save_dir}"
-    )
+    print(f"Figures saved -> {save_dir}")
 
 ##############################################################
 ###################### MAIN PIPELINE ##########################
 ##############################################################
 
+attribution_store = {}
+fake_positions_store = {}
+
 for training_mode, adv in [
-
     ("clean", False),
-
     ("adversarial", True),
-
 ]:
-
     print("=" * 80)
     print(training_mode)
     print("=" * 80)
 
     for name in rats:
-
         print(f"\nTraining {name} ...")
 
-        ###########################################################
-        # Load dataset
-        ###########################################################
-
         spikes, position = load_local_rat_dataset(name)
-
         split = int(0.8 * len(spikes))
-
         train_data = spikes[:split]
         test_data = spikes[split:]
-
         train_label = position[:split, :2]
         test_label = position[split:, :2]
 
-        ###########################################################
-        # Add fake neurons
-        ###########################################################
-
         key = f"{name}_adv" if adv else name
-
         train_data, test_data, fake_positions = add_fake_neurons(
-
-            train_data,
-
-            test_data,
-
-            key,
-
-        )
-
+            train_data, test_data, key)
+        fake_positions_store[name] = fake_positions
         print("Fake neurons:", fake_positions)
 
-        ###########################################################
         # Train
-        ###########################################################
-
         setup_seed(0)
-
         model = CEBRA(
             batch_size=2048,
             temperature=0.4,
             model_architecture="offset36-model-more-dropout",
             time_offsets=4,
-            max_iterations=1500,
+            max_iterations=1000,
             output_dimension=48,
             verbose=True,
             training_mode=training_mode,
@@ -585,102 +506,227 @@ for training_mode, adv in [
             adv_steps=10,
             attack_norm="l2",
             jacobian_weight=0.01,
-            adv_aggregate = True,
-
+            adv_aggregate=True,
         )
+        model.fit(train_data, train_label)
 
-        model.fit(
-
-            train_data,
-
-            train_label,
-
-        )
-
-        ###########################################################
         # Decoder
-        ###########################################################
-
         r2 = compute_decoder_score(
-            model,
-            train_data,
-            test_data,
-            train_label,
-            test_label,
-        )
-
+            model, train_data, test_data, train_label, test_label)
         mode = "adv" if adv else "clean"
         scores[mode][name] = r2
         print(f"R² = {r2:.4f}")
-        ###########################################################
+
         # Attribution
-        ###########################################################
-        result = compute_attribution(model,train_data,
-        )
+        result = compute_attribution(model, train_data)
 
-        ###########################################################
-        # Save figures
-        ###########################################################
+        if name not in attribution_store:
+            attribution_store[name] = {}
+        attribution_store[name][mode] = result
 
-        save_heatmaps(
-
-            rat=name,
-
-            mode=mode,
-
-            result=result,
-
-            fake_positions=fake_positions,
-
-        )
-
-        ###########################################################
-        # Fake neurons importance
-        ###########################################################
-
+        # Fake neuron importance
         fake_score = result["jfinv"][:, fake_positions]
-
-        print()
-
-        print("Fake neuron importance:")
-
+        print("\nFake neuron importance:")
         print(fake_score.mean(axis=0))
 
-        ###########################################################
-        # Free GPU
-        ###########################################################
-
         del model
-
         torch.cuda.empty_cache()
+
+print("\nSaving comparison plots...")
+for name in rats:
+    if "clean" in attribution_store.get(name, {}) and \
+       "adv" in attribution_store.get(name, {}):
+        save_comparison_plots(
+            rat=name,
+            results=attribution_store[name],
+            fake_positions=fake_positions_store[name],
+        )
+    else:
+        print(f"[{name}] skip (missing clean or adv result)")
 
 ##############################################################
 
 print()
-
 print("=" * 60)
-
 print("Decoder Results")
-
 print("=" * 60)
-
 for mode in scores:
-
-    print()
-
-    print(mode)
-
+    print(f"\n{mode}")
     for rat in rats:
-
-        print(
-
-            f"{rat:10s}: {scores[mode][rat]:.4f}"
-
-        )
+        if rat in scores[mode]:
+            print(f"  {rat:10s}: {scores[mode][rat]:.4f}")
 
 print()
-
 print("Finished.")
+
+# for training_mode, adv in [
+
+#     ("clean", False),
+
+#     ("adversarial", True),
+
+# ]:
+
+#     print("=" * 80)
+#     print(training_mode)
+#     print("=" * 80)
+
+#     for name in rats:
+
+#         print(f"\nTraining {name} ...")
+
+#         ###########################################################
+#         # Load dataset
+#         ###########################################################
+
+#         spikes, position = load_local_rat_dataset(name)
+
+#         split = int(0.8 * len(spikes))
+
+#         train_data = spikes[:split]
+#         test_data = spikes[split:]
+
+#         train_label = position[:split, :2]
+#         test_label = position[split:, :2]
+
+#         ###########################################################
+#         # Add fake neurons
+#         ###########################################################
+
+#         key = f"{name}_adv" if adv else name
+
+#         train_data, test_data, fake_positions = add_fake_neurons(
+
+#             train_data,
+
+#             test_data,
+
+#             key,
+
+#         )
+
+#         print("Fake neurons:", fake_positions)
+
+#         ###########################################################
+#         # Train
+#         ###########################################################
+
+#         setup_seed(0)
+
+#         model = CEBRA(
+#             batch_size=2048,
+#             temperature=0.4,
+#             model_architecture="offset36-model-more-dropout",
+#             time_offsets=4,
+#             max_iterations=1500,
+#             output_dimension=48,
+#             verbose=True,
+#             training_mode=training_mode,
+#             adv_alpha=adv_epsilon / 5,
+#             adv_epsilon=adv_epsilon,
+#             adv_steps=10,
+#             attack_norm="l2",
+#             jacobian_weight=0.01,
+#             adv_aggregate = True,
+
+#         )
+
+#         model.fit(
+
+#             train_data,
+
+#             train_label,
+
+#         )
+
+#         ###########################################################
+#         # Decoder
+#         ###########################################################
+
+#         r2 = compute_decoder_score(
+#             model,
+#             train_data,
+#             test_data,
+#             train_label,
+#             test_label,
+#         )
+
+#         mode = "adv" if adv else "clean"
+#         scores[mode][name] = r2
+#         print(f"R² = {r2:.4f}")
+#         ###########################################################
+#         # Attribution
+#         ###########################################################
+#         result = compute_attribution(model,train_data,
+#         )
+
+#         ###########################################################
+#         # Save figures
+#         ###########################################################
+
+#         save_heatmaps(
+
+#             rat=name,
+
+#             mode=mode,
+
+#             result=result,
+
+#             fake_positions=fake_positions,
+
+#         )
+
+#         ###########################################################
+#         # Fake neurons importance
+#         ###########################################################
+
+#         fake_score = result["jfinv"][:, fake_positions]
+
+#         print()
+
+#         print("Fake neuron importance:")
+
+#         print(fake_score.mean(axis=0))
+
+#         ###########################################################
+#         # Free GPU
+#         ###########################################################
+
+#         del model
+
+#         torch.cuda.empty_cache()
+
+# ##############################################################
+
+# print()
+
+# print("=" * 60)
+
+# print("Decoder Results")
+
+# print("=" * 60)
+
+# for mode in scores:
+
+#     print()
+
+#     print(mode)
+
+#     for rat in rats:
+
+#         print(
+
+#             f"{rat:10s}: {scores[mode][rat]:.4f}"
+
+#         )
+
+# print()
+
+# print("Finished.")
+
+
+
+
 #import sys
 # import os
 # import shutil
