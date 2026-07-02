@@ -142,108 +142,6 @@ print(
     ground_truth_attribution.shape,
 )
 
-RESULT_DIR = "results_fake"
-os.makedirs(RESULT_DIR, exist_ok=True)
-
-##############################################################
-###################### MAIN PIPELINE ##########################
-##############################################################
-spikes, labels = load_synthetic_dataset()
-
-model_results = {}
-
-for training_mode in [
-    "clean",
-    "adversarial",
-]:
-
-    print("=" * 80)
-    print(training_mode)
-    print("=" * 80)
-
-    setup_seed(0)
-
-    model = CEBRA(
-        batch_size=512,
-        temperature=0.4,
-        model_architecture="offset36-model-more-dropout",
-        time_offsets=4,
-        max_iterations=1000,
-        output_dimension=len(latents),
-        verbose=True,
-        training_mode=training_mode,
-        adv_alpha=adv_epsilon / 5,
-        adv_epsilon=adv_epsilon,
-        adv_steps=10,
-        attack_norm="l2",
-        jacobian_weight=0.01,
-        adv_aggregate=True,
-    )
-
-    model.fit(
-        spikes,
-        labels,
-    )
-
-    result = compute_attribution(
-        model,
-        spikes,
-    )
-
-    torch_model = get_torch_model(model)
-
-    method = cebra.attribution.init(
-        name="jacobian-based-batched",
-        model=torch_model,
-        input_data=torch.from_numpy(spikes).float().to(device),
-        output_dimension=torch_model.num_output,
-        num_samples=2000,
-    )
-
-    auc_jf = method.compute_attribution_score(
-        result["jf"],
-        ground_truth_attribution,
-    )
-
-    auc_jfinv = method.compute_attribution_score(
-        result["jfinv"],
-        ground_truth_attribution,
-    )
-
-    auc_jfconvabsinv = method.compute_attribution_score(
-        np.abs(
-            method.compute_attribution_map(
-                batch_size=256,
-            )["jf-convabs-inv-svd"]
-        ).mean(0),
-        ground_truth_attribution,
-    )
-
-    model_results[training_mode] = {
-        "result": result,
-        "auc_jf": auc_jf,
-        "auc_jfinv": auc_jfinv,
-        "auc_jfconvabsinv": auc_jfconvabsinv,
-    }
-
-    del method
-    del model
-    torch.cuda.empty_cache()
-
-print()
-
-print("=== Clean ===")
-print(f"AUC jf            = {model_results['clean']['auc_jf']:.4f}")
-print(f"AUC jf-inv         = {model_results['clean']['auc_jfinv']:.4f}")
-print(f"AUC jf-convabs-inv = {model_results['clean']['auc_jfconvabsinv']:.4f}")
-
-print()
-
-print("=== Adversarial ===")
-print(f"AUC jf            = {model_results['adversarial']['auc_jf']:.4f}")
-print(f"AUC jf-inv         = {model_results['adversarial']['auc_jfinv']:.4f}")
-print(f"AUC jf-convabs-inv = {model_results['adversarial']['auc_jfconvabsinv']:.4f}")
-
 def compute_attribution(
     model,
     neural,
@@ -379,6 +277,245 @@ def save_ground_truth_plot(
     )
 
     plt.close()
+
+
+RESULT_DIR = "results_fake"
+os.makedirs(RESULT_DIR, exist_ok=True)
+
+##############################################################
+###################### MAIN PIPELINE ##########################
+##############################################################
+spikes, labels = load_synthetic_dataset()
+
+model_results = {}
+
+for training_mode in [
+    "clean",
+    "adversarial",
+]:
+
+    print("=" * 80)
+    print(training_mode)
+    print("=" * 80)
+
+    setup_seed(0)
+
+    model = CEBRA(
+        batch_size=512,
+        temperature=0.4,
+        model_architecture="offset36-model-more-dropout",
+        time_offsets=4,
+        max_iterations=1000,
+        output_dimension=len(latents),
+        verbose=True,
+        training_mode=training_mode,
+        adv_alpha=adv_epsilon / 5,
+        adv_epsilon=adv_epsilon,
+        adv_steps=10,
+        attack_norm="l2",
+        jacobian_weight=0.01,
+        adv_aggregate=True,
+    )
+
+    model.fit(
+        spikes,
+        labels,
+    )
+
+    result = compute_attribution(
+        model,
+        spikes,
+    )
+
+    torch_model = get_torch_model(model)
+
+    method = cebra.attribution.init(
+        name="jacobian-based-batched",
+        model=torch_model,
+        input_data=torch.from_numpy(spikes).float().to(device),
+        output_dimension=torch_model.num_output,
+        num_samples=2000,
+    )
+
+    auc_jf = method.compute_attribution_score(
+        result["jf"],
+        ground_truth_attribution,
+    )
+
+    auc_jfinv = method.compute_attribution_score(
+        result["jfinv"],
+        ground_truth_attribution,
+    )
+
+    auc_jfconvabsinv = method.compute_attribution_score(
+        np.abs(
+            method.compute_attribution_map(
+                batch_size=256,
+            )["jf-convabs-inv-svd"]
+        ).mean(0),
+        ground_truth_attribution,
+    )
+
+    model_results[training_mode] = {
+        "result": result,
+        "auc_jf": auc_jf,
+        "auc_jfinv": auc_jfinv,
+        "auc_jfconvabsinv": auc_jfconvabsinv,
+    }
+
+    del method
+    del model
+    torch.cuda.empty_cache()
+
+print()
+
+print("=== Clean ===")
+print(f"AUC jf            = {model_results['clean']['auc_jf']:.4f}")
+print(f"AUC jf-inv         = {model_results['clean']['auc_jfinv']:.4f}")
+print(f"AUC jf-convabs-inv = {model_results['clean']['auc_jfconvabsinv']:.4f}")
+
+print()
+
+print("=== Adversarial ===")
+print(f"AUC jf            = {model_results['adversarial']['auc_jf']:.4f}")
+print(f"AUC jf-inv         = {model_results['adversarial']['auc_jfinv']:.4f}")
+print(f"AUC jf-convabs-inv = {model_results['adversarial']['auc_jfconvabsinv']:.4f}")
+
+# def compute_attribution(
+#     model,
+#     neural,
+#     batch_size=256,
+#     num_samples=2000,
+# ):
+
+#     neural = torch.from_numpy(neural).float().to(device)
+
+#     neural.requires_grad_(True)
+
+#     torch_model = get_torch_model(model)
+
+#     method = cebra.attribution.init(
+#         name="jacobian-based-batched",
+#         model=torch_model,
+#         input_data=neural,
+#         output_dimension=torch_model.num_output,
+#         num_samples=num_samples,
+#     )
+
+#     attribution = method.compute_attribution_map(
+#         batch_size=batch_size,
+#     )
+
+#     jf = np.abs(
+#         attribution["jf"]
+#     ).mean(axis=0)
+
+#     jfinv = np.abs(
+#         attribution["jf-inv-svd"]
+#     ).mean(axis=0)
+
+#     jfconvabsinv = np.abs(
+#         attribution["jf-convabs-inv-svd"]
+#     ).mean(axis=0)
+
+#     del method
+
+#     torch.cuda.empty_cache()
+
+#     return {
+#         "jf": jf,
+#         "jfinv": jfinv,
+#         "jfconvabsinv": jfconvabsinv,
+#     }
+
+# def save_ground_truth_plot(
+#     ground_truth,
+#     clean_result,
+#     adv_result,
+# ):
+
+#     clean_bin = (
+#         zscore(
+#             clean_result["jfinv"],
+#             axis=None,
+#         ) > 0
+#     ).astype(int)
+
+#     adv_bin = (
+#         zscore(
+#             adv_result["jfinv"],
+#             axis=None,
+#         ) > 0
+#     ).astype(int)
+
+#     fig, axs = plt.subplots(
+#         1,
+#         3,
+#         figsize=(18,5),
+#     )
+
+#     im = axs[0].imshow(
+#         ground_truth,
+#         aspect="auto",
+#         cmap="Greys",
+#         vmin=0,
+#         vmax=1,
+#     )
+
+#     axs[0].set_title(
+#         "Ground Truth",
+#     )
+
+#     plt.colorbar(
+#         im,
+#         ax=axs[0],
+#     )
+
+#     im = axs[1].imshow(
+#         clean_bin,
+#         aspect="auto",
+#         cmap="Greys",
+#         vmin=0,
+#         vmax=1,
+#     )
+
+#     axs[1].set_title(
+#         "Clean",
+#     )
+
+#     plt.colorbar(
+#         im,
+#         ax=axs[1],
+#     )
+
+#     im = axs[2].imshow(
+#         adv_bin,
+#         aspect="auto",
+#         cmap="Greys",
+#         vmin=0,
+#         vmax=1,
+#     )
+
+#     axs[2].set_title(
+#         "Adversarial",
+#     )
+
+#     plt.colorbar(
+#         im,
+#         ax=axs[2],
+#     )
+
+#     plt.tight_layout()
+
+#     plt.savefig(
+#         os.path.join(
+#             RESULT_DIR,
+#             "ground_truth_vs_clean_adv.png",
+#         ),
+#         dpi=300,
+#     )
+
+#     plt.close()
 
 print(f"AUC jf-convabs-inv = {model_results['adversarial']['auc_jfconvabsinv']:.4f}")
 
