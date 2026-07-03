@@ -327,8 +327,8 @@ for training_mode in [
         adv_epsilon=adv_epsilon,
         adv_steps=10,
         attack_norm="l2",
-        jacobian_weight=0.01,
-        adv_aggregate=True,
+        jacobian_weight=0,#0.01
+        adv_aggregate=False,
     )
 
     model.fit(
