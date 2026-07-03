@@ -1,4 +1,5 @@
 import requests
+import os
 
 FAKE_DATASET_DIR = "fake_dataset"
 os.makedirs(FAKE_DATASET_DIR, exist_ok=True)
