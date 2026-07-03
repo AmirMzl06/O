@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import zscore
 
 
+REPO_DIR = "CEBRA"
 
 FAKE_DATASET_DIR = "fake_dataset"
 os.makedirs(FAKE_DATASET_DIR, exist_ok=True)
