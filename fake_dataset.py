@@ -8,7 +8,6 @@ import pickle
 import itertools
 import requests
 
-import joblib
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
@@ -26,16 +25,7 @@ if not os.path.exists(REPO_DIR):
         ],
         check=True,
     )
-sys.path.insert(0, REPO_DIR)
-
-if "cebra" in sys.modules:
-    del sys.modules["cebra"]
-
-import cebra
-import cebra.attribution
-
-from cebra import CEBRA
-
+    
 shutil.copy(
     "base.py",
     os.path.join(
@@ -60,10 +50,22 @@ shutil.copy(
     ),
 )
 
+
 base_path = os.path.join(
     REPO_DIR,
     "cebra/solver/base.py",
 )
+
+sys.path.insert(0, REPO_DIR)
+
+if "cebra" in sys.modules:
+    del sys.modules["cebra"]
+
+import cebra
+import cebra.attribution
+
+from cebra import CEBRA
+
 
 with open(base_path, "r") as f:
     content = f.read()
@@ -81,19 +83,6 @@ if "AuxiliaryVariableSolver" not in content:
         )
 
 print("Patch applied.")
-
-sys.path.insert(
-    0,
-    REPO_DIR,
-)
-
-if "cebra" in sys.modules:
-    del sys.modules["cebra"]
-
-import cebra
-import cebra.attribution
-
-from cebra import CEBRA
 
 print("CEBRA:", cebra.__version__)
 
