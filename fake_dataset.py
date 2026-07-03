@@ -29,6 +29,33 @@ FAKE_DATASET_URL = (
     "noise0.25_bs100_seed231209234.p?download=1"
 )
 
+if not os.path.exists(REPO_DIR):
+    subprocess.run([
+        "git",
+        "clone",
+        "https://github.com/AdaptiveMotorControlLab/CEBRA.git"
+    ], check=True)
+
+shutil.copy(
+    "base.py",
+    os.path.join(REPO_DIR, "cebra/solver/base.py")
+)
+
+shutil.copy(
+    "cebra.py",
+    os.path.join(REPO_DIR, "cebra/integrations/sklearn/cebra.py")
+)
+
+shutil.copy(
+    "cebra.py",
+    os.path.join(REPO_DIR, "cebra/cebra.py")
+)
+
+import cebra
+import cebra.attribution
+
+from cebra import CEBRA
+
 def download_fake_dataset():
 
     if os.path.exists(FAKE_DATASET_FILE):
