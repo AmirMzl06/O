@@ -1,19 +1,13 @@
+from pathlib import Path
 import h5py
 
-f = h5py.File("monkey_dataset/Jango_20150730_001.mat", "r")
+for file in sorted(Path("monkey_dataset").glob("*.mat")):
+    with h5py.File(file, "r") as f:
+        xds = f["xds"]
 
-xds = f["xds"]
-
-for key in [
-    "spike_counts",
-    "EMG",
-    "force",
-    "curs_p",
-    "trial_target_dir",
-    "unit_names",
-]:
-    obj = xds[key]
-    print(f"\n{key}")
-    print(type(obj))
-    print(obj.shape)
-    print(obj.dtype)
+        print(
+            file.name,
+            xds["spike_counts"].shape,
+            xds["EMG"].shape,
+            xds["force"].shape,
+        )
