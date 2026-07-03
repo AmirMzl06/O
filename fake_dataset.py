@@ -1,9 +1,12 @@
-import requests
-import os
+from typing_extensions import List
 import sys
+import os
 import shutil
 import subprocess
 import random
+import pickle
+import itertools
+import requests
 
 import joblib
 import numpy as np
@@ -12,11 +15,113 @@ import matplotlib.pyplot as plt
 
 from scipy.stats import zscore
 
-
 REPO_DIR = "CEBRA"
 
+if not os.path.exists(REPO_DIR):
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "https://github.com/AdaptiveMotorControlLab/CEBRA.git",
+        ],
+        check=True,
+    )
+sys.path.insert(0, REPO_DIR)
+
+if "cebra" in sys.modules:
+    del sys.modules["cebra"]
+
+import cebra
+import cebra.attribution
+
+from cebra import CEBRA
+
+shutil.copy(
+    "base.py",
+    os.path.join(
+        REPO_DIR,
+        "cebra/solver/base.py",
+    ),
+)
+
+shutil.copy(
+    "cebra.py",
+    os.path.join(
+        REPO_DIR,
+        "cebra/integrations/sklearn/cebra.py",
+    ),
+)
+
+shutil.copy(
+    "cebra.py",
+    os.path.join(
+        REPO_DIR,
+        "cebra/cebra.py",
+    ),
+)
+
+base_path = os.path.join(
+    REPO_DIR,
+    "cebra/solver/base.py",
+)
+
+with open(base_path, "r") as f:
+    content = f.read()
+
+if "AuxiliaryVariableSolver" not in content:
+
+    with open(base_path, "a") as f:
+
+        f.write(
+            "\nclass AuxiliaryVariableSolver(Solver):\n    pass\n"
+        )
+
+        f.write(
+            "\nclass DiscreteAuxiliaryVariableSolver(Solver):\n    pass\n"
+        )
+
+print("Patch applied.")
+
+sys.path.insert(
+    0,
+    REPO_DIR,
+)
+
+if "cebra" in sys.modules:
+    del sys.modules["cebra"]
+
+import cebra
+import cebra.attribution
+
+from cebra import CEBRA
+
+print("CEBRA:", cebra.__version__)
+
+device = torch.device(
+    "cuda"
+    if torch.cuda.is_available()
+    else "cpu"
+)
+
+adv_epsilon = 0.1
+
+RESULT_DIR = "results_fake"
+
+os.makedirs(
+    RESULT_DIR,
+    exist_ok=True,
+)
+
+############################################################
+################ DOWNLOAD SYNTHETIC DATASET ################
+############################################################
+
 FAKE_DATASET_DIR = "fake_dataset"
-os.makedirs(FAKE_DATASET_DIR, exist_ok=True)
+
+os.makedirs(
+    FAKE_DATASET_DIR,
+    exist_ok=True,
+)
 
 FAKE_DATASET_FILE = os.path.join(
     FAKE_DATASET_DIR,
@@ -30,37 +135,13 @@ FAKE_DATASET_URL = (
     "noise0.25_bs100_seed231209234.p?download=1"
 )
 
-if not os.path.exists(REPO_DIR):
-    subprocess.run([
-        "git",
-        "clone",
-        "https://github.com/AdaptiveMotorControlLab/CEBRA.git"
-    ], check=True)
-
-shutil.copy(
-    "base.py",
-    os.path.join(REPO_DIR, "cebra/solver/base.py")
-)
-
-shutil.copy(
-    "cebra.py",
-    os.path.join(REPO_DIR, "cebra/integrations/sklearn/cebra.py")
-)
-
-shutil.copy(
-    "cebra.py",
-    os.path.join(REPO_DIR, "cebra/cebra.py")
-)
-
-import cebra
-import cebra.attribution
-
-from cebra import CEBRA
 
 def download_fake_dataset():
 
     if os.path.exists(FAKE_DATASET_FILE):
+
         print("Synthetic dataset already exists.")
+
         return
 
     print("Downloading synthetic dataset...")
@@ -72,7 +153,7 @@ def download_fake_dataset():
 
     response.raise_for_status()
 
-    total_size = int(
+    total = int(
         response.headers.get(
             "content-length",
             0,
@@ -91,36 +172,47 @@ def download_fake_dataset():
         ):
 
             if chunk:
+
                 f.write(chunk)
+
                 downloaded += len(chunk)
-                if total_size > 0:
-                    percent = downloaded * 100 / total_size
+
+                if total > 0:
 
                     print(
-                        f"\r{percent:6.2f}% "
+                        f"\r{downloaded*100/total:6.2f}% "
                         f"({downloaded/1024**2:.1f}/"
-                        f"{total_size/1024**2:.1f} MB)",
+                        f"{total/1024**2:.1f} MB)",
                         end="",
                     )
 
     print("\nDownload complete.")
 
+
 download_fake_dataset()
-
-import pickle
-
 def load_synthetic_dataset():
 
-    with open(FAKE_DATASET_FILE, "rb") as f:
+    with open(
+        FAKE_DATASET_FILE,
+        "rb",
+    ) as f:
+
         synthetic_dataset = pickle.load(f)
 
-    spikes = synthetic_dataset["spikes"].astype(np.float32)
+    spikes = synthetic_dataset["spikes"].astype(
+        np.float32,
+    )
 
-    position = synthetic_dataset["position"].astype(np.float32)
+    position = synthetic_dataset["position"].astype(
+        np.float32,
+    )
 
-    speed = synthetic_dataset["speed"].astype(np.float32)
+    speed = synthetic_dataset["speed"].astype(
+        np.float32,
+    )
 
     if speed.ndim == 1:
+
         speed = speed[:, None]
 
     labels = np.concatenate(
@@ -137,7 +229,10 @@ def load_synthetic_dataset():
 
     return spikes, labels
 
-import itertools
+
+############################################################
+###################### GROUND TRUTH #########################
+############################################################
 
 cells = [
     ["position"] * 100,
@@ -148,13 +243,21 @@ cells = [
 
 cells = np.array(
     list(
-        itertools.chain.from_iterable(cells)
+        itertools.chain.from_iterable(
+            cells,
+        )
     )
 )
 
 latents = [
-    (["position", "grid"], 3),
-    (["speed"], 11),
+    (
+        ["position", "grid"],
+        3,
+    ),
+    (
+        ["speed"],
+        11,
+    ),
 ]
 
 latents = [
@@ -184,6 +287,32 @@ print(
     ground_truth_attribution.shape,
 )
 
+
+############################################################
+######################## HELPERS ############################
+############################################################
+
+def setup_seed(seed=42):
+
+    torch.manual_seed(seed)
+
+    np.random.seed(seed)
+
+    random.seed(seed)
+
+    if torch.cuda.is_available():
+
+        torch.cuda.manual_seed_all(seed)
+
+
+def get_torch_model(model):
+    torch_model = model.solver_.model
+    torch_model.split_outputs = False
+    torch_model.to(device)
+    torch_model.eval()
+    return torch_model
+
+
 def compute_attribution(
     model,
     neural,
@@ -191,11 +320,15 @@ def compute_attribution(
     num_samples=2000,
 ):
 
-    neural = torch.from_numpy(neural).float().to(device)
+    neural = torch.from_numpy(
+        neural,
+    ).float().to(device)
 
     neural.requires_grad_(True)
 
-    torch_model = get_torch_model(model)
+    torch_model = get_torch_model(
+        model,
+    )
 
     method = cebra.attribution.init(
         name="jacobian-based-batched",
@@ -210,15 +343,15 @@ def compute_attribution(
     )
 
     jf = np.abs(
-        attribution["jf"]
+        attribution["jf"],
     ).mean(axis=0)
 
     jfinv = np.abs(
-        attribution["jf-inv-svd"]
+        attribution["jf-inv-svd"],
     ).mean(axis=0)
 
     jfconvabsinv = np.abs(
-        attribution["jf-convabs-inv-svd"]
+        attribution["jf-convabs-inv-svd"],
     ).mean(axis=0)
 
     del method
@@ -230,15 +363,6 @@ def compute_attribution(
         "jfinv": jfinv,
         "jfconvabsinv": jfconvabsinv,
     }
-
-def setup_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
 
 def save_ground_truth_plot(
     ground_truth,
@@ -266,6 +390,8 @@ def save_ground_truth_plot(
         figsize=(18,5),
     )
 
+    ########################################################
+
     im = axs[0].imshow(
         ground_truth,
         aspect="auto",
@@ -278,10 +404,20 @@ def save_ground_truth_plot(
         "Ground Truth",
     )
 
+    axs[0].set_xlabel(
+        "Neurons",
+    )
+
+    axs[0].set_ylabel(
+        "Latent Dimensions",
+    )
+
     plt.colorbar(
         im,
         ax=axs[0],
     )
+
+    ########################################################
 
     im = axs[1].imshow(
         clean_bin,
@@ -295,10 +431,20 @@ def save_ground_truth_plot(
         "Clean",
     )
 
+    axs[1].set_xlabel(
+        "Neurons",
+    )
+
+    axs[1].set_ylabel(
+        "Latent Dimensions",
+    )
+
     plt.colorbar(
         im,
         ax=axs[1],
     )
+
+    ########################################################
 
     im = axs[2].imshow(
         adv_bin,
@@ -312,10 +458,20 @@ def save_ground_truth_plot(
         "Adversarial",
     )
 
+    axs[2].set_xlabel(
+        "Neurons",
+    )
+
+    axs[2].set_ylabel(
+        "Latent Dimensions",
+    )
+
     plt.colorbar(
         im,
         ax=axs[2],
     )
+
+    ########################################################
 
     plt.tight_layout()
 
@@ -329,20 +485,28 @@ def save_ground_truth_plot(
 
     plt.close()
 
-
-RESULT_DIR = "results_fake"
-os.makedirs(RESULT_DIR, exist_ok=True)
+    print(
+        "Figure saved ->",
+        os.path.join(
+            RESULT_DIR,
+            "ground_truth_vs_clean_adv.png",
+        ),
+    )
 
 ##############################################################
 ###################### MAIN PIPELINE ##########################
 ##############################################################
+
 spikes, labels = load_synthetic_dataset()
 
 model_results = {}
 
 for training_mode in [
+
     "clean",
+
     "adversarial",
+
 ]:
 
     print("=" * 80)
@@ -364,7 +528,7 @@ for training_mode in [
         adv_epsilon=adv_epsilon,
         adv_steps=10,
         attack_norm="l2",
-        jacobian_weight=0,#0.01
+        jacobian_weight=0,
         adv_aggregate=False,
     )
 
@@ -373,64 +537,342 @@ for training_mode in [
         labels,
     )
 
+    ########################################################
+
     result = compute_attribution(
         model,
         spikes,
     )
 
-    torch_model = get_torch_model(model)
+    ########################################################
+
+    torch_model = get_torch_model(model,)
 
     method = cebra.attribution.init(
+
         name="jacobian-based-batched",
+
         model=torch_model,
-        input_data=torch.from_numpy(spikes).float().to(device),
+
+        input_data=torch.from_numpy(
+            spikes,
+        ).float().to(device),
+
         output_dimension=torch_model.num_output,
+
         num_samples=2000,
+
     )
 
+    ########################################################
+
     auc_jf = method.compute_attribution_score(
+
         result["jf"],
+
         ground_truth_attribution,
+
     )
 
     auc_jfinv = method.compute_attribution_score(
+
         result["jfinv"],
+
         ground_truth_attribution,
+
     )
 
     auc_jfconvabsinv = method.compute_attribution_score(
-        np.abs(
-            method.compute_attribution_map(
-                batch_size=256,
-            )["jf-convabs-inv-svd"]
-        ).mean(0),
+
+        result["jfconvabsinv"],
+
         ground_truth_attribution,
+
     )
 
+    ########################################################
+
     model_results[training_mode] = {
+
         "result": result,
+
         "auc_jf": auc_jf,
+
         "auc_jfinv": auc_jfinv,
+
         "auc_jfconvabsinv": auc_jfconvabsinv,
+
     }
 
+    ########################################################
+
     del method
+
     del model
+
     torch.cuda.empty_cache()
+
+##############################################################
+########################## RESULTS ############################
+##############################################################
 
 print()
 
 print("=== Clean ===")
-print(f"AUC jf            = {model_results['clean']['auc_jf']:.4f}")
-print(f"AUC jf-inv         = {model_results['clean']['auc_jfinv']:.4f}")
-print(f"AUC jf-convabs-inv = {model_results['clean']['auc_jfconvabsinv']:.4f}")
+
+print(
+    f"AUC jf            = "
+    f"{model_results['clean']['auc_jf']:.4f}"
+)
+
+print(
+    f"AUC jf-inv         = "
+    f"{model_results['clean']['auc_jfinv']:.4f}"
+)
+
+print(
+    f"AUC jf-convabs-inv = "
+    f"{model_results['clean']['auc_jfconvabsinv']:.4f}"
+)
 
 print()
 
 print("=== Adversarial ===")
-print(f"AUC jf            = {model_results['adversarial']['auc_jf']:.4f}")
-print(f"AUC jf-inv         = {model_results['adversarial']['auc_jfinv']:.4f}")
-print(f"AUC jf-convabs-inv = {model_results['adversarial']['auc_jfconvabsinv']:.4f}")
+
+print(
+    f"AUC jf            = "
+    f"{model_results['adversarial']['auc_jf']:.4f}"
+)
+
+print(
+    f"AUC jf-inv         = "
+    f"{model_results['adversarial']['auc_jfinv']:.4f}"
+)
+
+print(
+    f"AUC jf-convabs-inv = "
+    f"{model_results['adversarial']['auc_jfconvabsinv']:.4f}"
+)
+
+##############################################################
+######################## SAVE FIGURE ##########################
+##############################################################
+
+save_ground_truth_plot(
+
+    ground_truth_attribution,
+
+    model_results["clean"]["result"],
+
+    model_results["adversarial"]["result"],
+
+)
+
+print()
+
+print("=" * 80)
+
+print("Finished.")
+
+print("=" * 80)
+
+
+
+
+
+
+
+
+
+
+
+
+
+#import requests
+# import os
+# import sys
+# import shutil
+# import subprocess
+# import random
+
+# import joblib
+# import numpy as np
+# import torch
+# import matplotlib.pyplot as plt
+
+# from scipy.stats import zscore
+
+
+# REPO_DIR = "CEBRA"
+
+# FAKE_DATASET_DIR = "fake_dataset"
+# os.makedirs(FAKE_DATASET_DIR, exist_ok=True)
+
+# FAKE_DATASET_FILE = os.path.join(
+#     FAKE_DATASET_DIR,
+#     "cynthi_neurons90.p",
+# )
+
+# FAKE_DATASET_URL = (
+#     "https://zenodo.org/records/15267195/files/"
+#     "cynthi_neurons90_gridbase0.5_gridmodules3_"
+#     "grid_head_direction_place_speed_duration2000_"
+#     "noise0.25_bs100_seed231209234.p?download=1"
+# )
+
+# if not os.path.exists(REPO_DIR):
+#     subprocess.run([
+#         "git",
+#         "clone",
+#         "https://github.com/AdaptiveMotorControlLab/CEBRA.git"
+#     ], check=True)
+
+# shutil.copy(
+#     "base.py",
+#     os.path.join(REPO_DIR, "cebra/solver/base.py")
+# )
+
+# shutil.copy(
+#     "cebra.py",
+#     os.path.join(REPO_DIR, "cebra/integrations/sklearn/cebra.py")
+# )
+
+# shutil.copy(
+#     "cebra.py",
+#     os.path.join(REPO_DIR, "cebra/cebra.py")
+# )
+
+# import cebra
+# import cebra.attribution
+
+# from cebra import CEBRA
+
+# def download_fake_dataset():
+
+#     if os.path.exists(FAKE_DATASET_FILE):
+#         print("Synthetic dataset already exists.")
+#         return
+
+#     print("Downloading synthetic dataset...")
+
+#     response = requests.get(
+#         FAKE_DATASET_URL,
+#         stream=True,
+#     )
+
+#     response.raise_for_status()
+
+#     total_size = int(
+#         response.headers.get(
+#             "content-length",
+#             0,
+#         )
+#     )
+
+#     downloaded = 0
+
+#     with open(
+#         FAKE_DATASET_FILE,
+#         "wb",
+#     ) as f:
+
+#         for chunk in response.iter_content(
+#             chunk_size=1024 * 1024,
+#         ):
+
+#             if chunk:
+#                 f.write(chunk)
+#                 downloaded += len(chunk)
+#                 if total_size > 0:
+#                     percent = downloaded * 100 / total_size
+
+#                     print(
+#                         f"\r{percent:6.2f}% "
+#                         f"({downloaded/1024**2:.1f}/"
+#                         f"{total_size/1024**2:.1f} MB)",
+#                         end="",
+#                     )
+
+#     print("\nDownload complete.")
+
+# download_fake_dataset()
+
+# import pickle
+
+# def load_synthetic_dataset():
+
+#     with open(FAKE_DATASET_FILE, "rb") as f:
+#         synthetic_dataset = pickle.load(f)
+
+#     spikes = synthetic_dataset["spikes"].astype(np.float32)
+
+#     position = synthetic_dataset["position"].astype(np.float32)
+
+#     speed = synthetic_dataset["speed"].astype(np.float32)
+
+#     if speed.ndim == 1:
+#         speed = speed[:, None]
+
+#     labels = np.concatenate(
+#         [
+#             position,
+#             speed,
+#         ],
+#         axis=1,
+#     )
+
+#     print(
+#         f"spikes={spikes.shape}  labels={labels.shape}"
+#     )
+
+#     return spikes, labels
+
+# import itertools
+
+# cells = [
+#     ["position"] * 100,
+#     ["hd"] * 100,
+#     ["position"] * 100,
+#     ["grid"] * 60,
+# ]
+
+# cells = np.array(
+#     list(
+#         itertools.chain.from_iterable(cells)
+#     )
+# )
+
+# latents = [
+#     (["position", "grid"], 3),
+#     (["speed"], 11),
+# ]
+
+# latents = [
+#     group
+#     for group, repeats in latents
+#     for _ in range(repeats)
+# ]
+
+# ground_truth_attribution = np.zeros(
+#     (
+#         len(latents),
+#         len(cells),
+#     ),
+#     dtype=bool,
+# )
+
+# for i, latent in enumerate(latents):
+
+#     for j, cell_type in enumerate(cells):
+
+#         ground_truth_attribution[i, j] = (
+#             cell_type in latent
+#         )
+
+# print(
+#     "Ground truth:",
+#     ground_truth_attribution.shape,
+# )
 
 # def compute_attribution(
 #     model,
@@ -478,6 +920,15 @@ print(f"AUC jf-convabs-inv = {model_results['adversarial']['auc_jfconvabsinv']:.
 #         "jfinv": jfinv,
 #         "jfconvabsinv": jfconvabsinv,
 #     }
+
+# def setup_seed(seed):
+#     random.seed(seed)
+#     np.random.seed(seed)
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed)
+#     torch.backends.cudnn.deterministic = True
+#     torch.backends.cudnn.benchmark = False
 
 # def save_ground_truth_plot(
 #     ground_truth,
@@ -568,13 +1019,106 @@ print(f"AUC jf-convabs-inv = {model_results['adversarial']['auc_jfconvabsinv']:.
 
 #     plt.close()
 
-print(f"AUC jf-convabs-inv = {model_results['adversarial']['auc_jfconvabsinv']:.4f}")
 
-save_ground_truth_plot(
-    ground_truth_attribution,
-    model_results["clean"]["result"],
-    model_results["adversarial"]["result"],
-)
+# RESULT_DIR = "results_fake"
+# os.makedirs(RESULT_DIR, exist_ok=True)
 
-print("\nFigure saved -> results_fake/ground_truth_vs_clean_adv.png")
+# ##############################################################
+# ###################### MAIN PIPELINE ##########################
+# ##############################################################
+# spikes, labels = load_synthetic_dataset()
+
+# model_results = {}
+
+# for training_mode in [
+#     "clean",
+#     "adversarial",
+# ]:
+
+#     print("=" * 80)
+#     print(training_mode)
+#     print("=" * 80)
+
+#     setup_seed(0)
+
+#     model = CEBRA(
+#         batch_size=512,
+#         temperature=0.4,
+#         model_architecture="offset36-model-more-dropout",
+#         time_offsets=4,
+#         max_iterations=1000,
+#         output_dimension=len(latents),
+#         verbose=True,
+#         training_mode=training_mode,
+#         adv_alpha=adv_epsilon / 5,
+#         adv_epsilon=adv_epsilon,
+#         adv_steps=10,
+#         attack_norm="l2",
+#         jacobian_weight=0,#0.01
+#         adv_aggregate=False,
+#     )
+
+#     model.fit(
+#         spikes,
+#         labels,
+#     )
+
+#     result = compute_attribution(
+#         model,
+#         spikes,
+#     )
+
+#     torch_model = get_torch_model(model)
+
+#     method = cebra.attribution.init(
+#         name="jacobian-based-batched",
+#         model=torch_model,
+#         input_data=torch.from_numpy(spikes).float().to(device),
+#         output_dimension=torch_model.num_output,
+#         num_samples=2000,
+#     )
+
+#     auc_jf = method.compute_attribution_score(
+#         result["jf"],
+#         ground_truth_attribution,
+#     )
+
+#     auc_jfinv = method.compute_attribution_score(
+#         result["jfinv"],
+#         ground_truth_attribution,
+#     )
+
+#     auc_jfconvabsinv = method.compute_attribution_score(
+#         np.abs(
+#             method.compute_attribution_map(
+#                 batch_size=256,
+#             )["jf-convabs-inv-svd"]
+#         ).mean(0),
+#         ground_truth_attribution,
+#     )
+
+#     model_results[training_mode] = {
+#         "result": result,
+#         "auc_jf": auc_jf,
+#         "auc_jfinv": auc_jfinv,
+#         "auc_jfconvabsinv": auc_jfconvabsinv,
+#     }
+
+#     del method
+#     del model
+#     torch.cuda.empty_cache()
+
+# print()
+
+# print("=== Clean ===")
+# print(f"AUC jf            = {model_results['clean']['auc_jf']:.4f}")
+# print(f"AUC jf-inv         = {model_results['clean']['auc_jfinv']:.4f}")
+# print(f"AUC jf-convabs-inv = {model_results['clean']['auc_jfconvabsinv']:.4f}")
+
+# print()
+
+# print("=== Adversarial ===")
+# print(f"AUC jf            = {model_results['adversarial']['auc_jf']:.4f}")
+# print(f"AUC jf-inv         = {model_results['adversarial']['auc_jfinv']:.4f}")
+# print(f"AUC jf-convabs-inv = {model_results['adversarial']['auc_jfconvabsinv']:.4f}")
 
