@@ -282,20 +282,20 @@ for training_mode, adv in [("clean", False), ("adversarial", True)]:
     setup_seed(0)
 
     model = CEBRA(
-        batch_size=BATCH_SIZE,
+        batch_size=2048 , #BATCH_SIZE,
         temperature=0.4,
         model_architecture="offset36-model-more-dropout",
         time_offsets=4,
-        max_iterations=MAX_ITER,
-        output_dimension=OUTPUT_DIM,
+        max_iterations=5000 , #MAX_ITER,
+        output_dimension=48 , #OUTPUT_DIM,
         verbose=True,
         training_mode=training_mode,
-        adv_alpha=adv_epsilon / 5,
-        adv_epsilon=adv_epsilon,
+        adv_alpha=0.03 ,#adv_epsilon / 5,
+        adv_epsilon=0.2 , #adv_epsilon,
         adv_steps=10,
         attack_norm="l2",
-        jacobian_weight=0.01,
-        adv_aggregate=True,
+        jacobian_weight=0,
+        adv_aggregate=False,
     )
 
     model.fit(tr_data, train_label)
