@@ -17,7 +17,7 @@ RESULT_DIR    = "results_monkey"
 REPO_DIR      = "CEBRA"
 N_FAKE        = 0
 adv_epsilon   = 0.5
-MAX_ITER      = 3000
+MAX_ITER      = 2000
 OUTPUT_DIM    = 48
 BATCH_SIZE    = 512
 
