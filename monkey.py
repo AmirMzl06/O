@@ -294,8 +294,8 @@ for training_mode, adv in [("clean", False), ("adversarial", True)]:
         adv_epsilon=adv_epsilon,
         adv_steps=10,
         attack_norm="l2",
-        jacobian_weight=0.01,
-        adv_aggregate=False,
+        jacobian_weight=0,
+        adv_aggregate=True,
     )
 
     model.fit(tr_data, train_label)
