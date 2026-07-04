@@ -11,7 +11,7 @@ import torch
 import matplotlib.pyplot as plt
 from scipy.stats import zscore
 
-SESSION_FILE  = "monkey_dataset/Jango_20150730_001.mat"
+SESSION_FILE  = "monkey_dataset/Jango_20150805_001.mat"
 DATASET_DIR   = "monkey_dataset"
 RESULT_DIR    = "results_monkey"
 REPO_DIR      = "CEBRA"
