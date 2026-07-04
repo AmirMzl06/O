@@ -19,7 +19,7 @@ N_FAKE        = 0
 adv_epsilon   = 0.5
 MAX_ITER      = 1000
 OUTPUT_DIM    = 48
-BATCH_SIZE    = 2048
+BATCH_SIZE    = 512
 
 os.makedirs(RESULT_DIR, exist_ok=True)
 
@@ -244,6 +244,12 @@ def save_comparison_plots(session_name, results, fake_positions):
 session_name = Path(SESSION_FILE).stem 
 
 spikes, position = load_monkey_session(SESSION_FILE)
+
+MAX_TIMESTEPS = 50_000 
+if len(spikes) > MAX_TIMESTEPS:
+    print(f"Subsampling from {len(spikes)} to {MAX_TIMESTEPS} timesteps...")
+    spikes   = spikes[:MAX_TIMESTEPS]
+    position = position[:MAX_TIMESTEPS]
 
 split        = int(0.8 * len(spikes))
 train_data   = spikes[:split]
