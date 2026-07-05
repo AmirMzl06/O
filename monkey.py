@@ -121,7 +121,7 @@ def load_monkey_session(mat_path,
                 trial_results.append(str(ref).encode())
 
         assert bin_size_ms % raw_bin_ms < 1e-6, \
-            f"bin_size_ms={bin_size_ms} باید مضرب raw_bin_ms={raw_bin_ms} باشد"
+            f"bin_size_ms={bin_size_ms} must mazrab raw_bin_ms={raw_bin_ms}"
         ratio = int(round(bin_size_ms / raw_bin_ms))
 
         T_trim = (T_raw // ratio) * ratio
