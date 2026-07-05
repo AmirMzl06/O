@@ -112,6 +112,13 @@ def load_monkey_session(mat_path,
 
         trial_result_raw = xds["trial_result"]
         trial_results = []
+        ##############
+        trial_result_raw = xds["trial_result"]
+        print(type(trial_result_raw))
+        print(trial_result_raw.shape)
+        print(trial_result_raw.dtype)
+        print(trial_result_raw[:10])
+        ##############
         for ref in trial_result_raw.flat:
             if isinstance(ref, h5py.Reference):
                 char_data = f[ref][:]
