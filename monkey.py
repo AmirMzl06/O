@@ -110,22 +110,20 @@ def load_monkey_session(mat_path,
         trial_start = read_h5_1d(xds["trial_start_time"])   # seconds
         trial_end   = read_h5_1d(xds["trial_end_time"])     # seconds
 
-        trial_result_raw = xds["trial_result"]
-        trial_results = []
-        ##############
-        trial_result_raw = xds["trial_result"]
-        print(type(trial_result_raw))
-        print(trial_result_raw.shape)
-        print(trial_result_raw.dtype)
-        print(trial_result_raw[:10])
-        ##############
-        for ref in trial_result_raw.flat:
-            if isinstance(ref, h5py.Reference):
-                char_data = f[ref][:]
-                result_char = chr(int(char_data.flat[0]))
-                trial_results.append(result_char.encode())
-            else:
-                trial_results.append(str(ref).encode())
+        trial_results = [
+            chr(int(v))
+            for v in xds["trial_result"][:].ravel()
+        ]
+
+        # trial_result_raw = xds["trial_result"]
+        # trial_results = []
+        # for ref in trial_result_raw.flat:
+        #     if isinstance(ref, h5py.Reference):
+        #         char_data = f[ref][:]
+        #         result_char = chr(int(char_data.flat[0]))
+        #         trial_results.append(result_char.encode())
+        #     else:
+        #         trial_results.append(str(ref).encode())
 
         assert bin_size_ms % raw_bin_ms < 1e-6, \
             f"bin_size_ms={bin_size_ms} must mazrab raw_bin_ms={raw_bin_ms}"
@@ -158,7 +156,7 @@ def load_monkey_session(mat_path,
         for i, (t_start, t_end, t_res) in enumerate(
                 zip(trial_start, trial_end, trial_results)):
 
-            if t_res != trial_result_filter:
+            if t_res != "R" :#trial_result_filter:
                 continue
             if np.isnan(t_start) or np.isnan(t_end):
                 continue
