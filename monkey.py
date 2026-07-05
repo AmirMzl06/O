@@ -15,12 +15,23 @@ from scipy.ndimage import gaussian_filter1d
 # ============================================================
 # CONFIG
 # ============================================================
-SESSION_FILE   = "monkey_dataset/Jango_20150730_001.mat"
+# SESSION_FILE   = "monkey_dataset/Jango_20150730_001.mat"
+DATASET_DIR = "monkey_dataset"
+
+sessions = [
+    Path(DATASET_DIR) / "Jango_20150730_001.mat",
+    Path(DATASET_DIR) / "Jango_20150731_001.mat",
+    Path(DATASET_DIR) / "Jango_20150801_001.mat",
+    Path(DATASET_DIR) / "Jango_20150805_001.mat",
+    Path(DATASET_DIR) / "Jango_20150806_001.mat",
+    Path(DATASET_DIR) / "Jango_20150807_001.mat",
+]
+
 RESULT_DIR     = "results_monkey"
 REPO_DIR       = "CEBRA"
 N_FAKE         = 0
 adv_epsilon    = 0.5
-MAX_ITER       = 1600
+MAX_ITER       = 1500
 OUTPUT_DIM     = 48
 BATCH_SIZE     = 512
 N_ELEC         = 96
@@ -333,96 +344,98 @@ def save_comparison_plots(session_name, results, fake_positions):
 # ============================================================
 # MAIN PIPELINE
 # ============================================================
-session_name = Path(SESSION_FILE).stem   # "Jango_20150730_001"
-
-print(f"\nLoading session: {session_name}")
-spikes_list, curs_list = load_monkey_session(SESSION_FILE)
-
-spikes, cursor = concat_trials(spikes_list, curs_list)
-
-split       = int(0.8 * len(spikes))
-train_data  = spikes[:split]
-test_data   = spikes[split:]
-train_label = cursor[:split,  :2]
-test_label  = cursor[split:,  :2]
-
-print(f"Train: {train_data.shape}  Test: {test_data.shape}")
-print(f"Label: {train_label.shape}")
-
-scores            = {"clean": {}, "adv": {}}
-attribution_store = {}
-fake_store        = {}
-
-for training_mode, adv in [("clean", False), ("adversarial", True)]:
-
-    print("\n" + "=" * 80)
-    print(f"Training mode: {training_mode}")
-    print("=" * 80)
-
-    key = f"{session_name}_adv" if adv else session_name
-
-    tr_data, te_data, fake_positions = add_fake_neurons(
-        train_data.copy(), test_data.copy(), key, fake_store)
-
-    if len(fake_positions) > 0:
-        print(f"Fake neurons ({N_FAKE}) at: {fake_positions}")
-    else:
-        print("No fake neurons.")
-
-    setup_seed(0)
-
-    model = CEBRA(
-        batch_size=BATCH_SIZE,
-        temperature=0.4,
-        model_architecture="offset36-model-more-dropout",
-        time_offsets=4,
-        max_iterations=MAX_ITER,
-        output_dimension=OUTPUT_DIM,
-        verbose=True,
-        training_mode=training_mode,
-        adv_alpha=adv_epsilon / 5,
-        adv_epsilon=adv_epsilon,
-        adv_steps=10,
-        attack_norm="l2",
-        jacobian_weight=0,
-        adv_aggregate=False,
-    )
-
-    model.fit(tr_data, train_label)
-
-    r2 = compute_decoder_score(
-        model, tr_data, te_data, train_label, test_label)
-    mode = "adv" if adv else "clean"
-    scores[mode][session_name] = r2
-    print(f"R² = {r2:.4f}")
-
-    result = compute_attribution(model, tr_data)
-    attribution_store[mode] = result
-
-    if len(fake_positions) > 0:
-        fake_score = result["jfinv"][:, fake_positions]
-        print("Fake neuron importance:")
-        print(fake_score.mean(axis=0))
-
-    del model
-    torch.cuda.empty_cache()
-
-# plots
-if "clean" in attribution_store and "adv" in attribution_store:
-    save_comparison_plots(
-        session_name=session_name,
-        results=attribution_store,
-        fake_positions=fake_store.get(session_name, np.array([])),
-    )
-
-print()
-print("=" * 60)
-print("Decoder Results")
-print("=" * 60)
-for mode in scores:
-    print(f"\n{mode}")
-    for sess, r2 in scores[mode].items():
-        print(f"  {sess}: {r2:.4f}")
+for SESSION_FILE in sessions:
+    session_name = Path(SESSION_FILE).stem
+    
+    print(f"\nLoading session: {session_name}")
+    spikes_list, curs_list = load_monkey_session(SESSION_FILE)
+    
+    spikes, cursor = concat_trials(spikes_list, curs_list)
+    
+    split       = int(0.8 * len(spikes))
+    train_data  = spikes[:split]
+    test_data   = spikes[split:]
+    train_label = cursor[:split,  :2]
+    test_label  = cursor[split:,  :2]
+    
+    print(f"Train: {train_data.shape}  Test: {test_data.shape}")
+    print(f"Label: {train_label.shape}")
+    
+    scores            = {"clean": {}, "adv": {}}
+    attribution_store = {}
+    fake_store        = {}
+    
+    for training_mode, adv in [("clean", False), ("adversarial", True)]:
+    
+        print("\n" + "=" * 80)
+        print(f"Training mode: {training_mode}")
+        print("=" * 80)
+    
+        key = f"{session_name}_adv" if adv else session_name
+    
+        tr_data, te_data, fake_positions = add_fake_neurons(
+            train_data.copy(), test_data.copy(), key, fake_store)
+    
+        if len(fake_positions) > 0:
+            print(f"Fake neurons ({N_FAKE}) at: {fake_positions}")
+        else:
+            print("No fake neurons.")
+    
+        setup_seed(0)
+    
+        model = CEBRA(
+            batch_size=BATCH_SIZE,
+            temperature=0.4,
+            model_architecture="offset36-model-more-dropout",
+            time_offsets=4,
+            max_iterations=MAX_ITER,
+            output_dimension=OUTPUT_DIM,
+            verbose=True,
+            training_mode=training_mode,
+            adv_alpha=adv_epsilon / 5,
+            adv_epsilon=adv_epsilon,
+            adv_steps=10,
+            attack_norm="l2",
+            jacobian_weight=0,
+            adv_aggregate=False,
+        )
+    
+        model.fit(tr_data, train_label)
+    
+        r2 = compute_decoder_score(
+            model, tr_data, te_data, train_label, test_label)
+        mode = "adv" if adv else "clean"
+        scores[mode][session_name] = r2
+        print(f"R² = {r2:.4f}")
+    
+        result = compute_attribution(model, tr_data)
+        attribution_store[mode] = result
+    
+        if len(fake_positions) > 0:
+            fake_score = result["jfinv"][:, fake_positions]
+            print("Fake neuron importance:")
+            print(fake_score.mean(axis=0))
+    
+        del model
+        torch.cuda.empty_cache()
+    
+    # plots
+    if "clean" in attribution_store and "adv" in attribution_store:
+        save_comparison_plots(
+            session_name=session_name,
+            results=attribution_store,
+            fake_positions=fake_store.get(session_name, np.array([])),
+        )
+    
+    print()
+    print("=" * 60)
+    print("Decoder Results")
+    print(f"session = {session_name}")
+    print("=" * 60)
+    for mode in scores:
+        print(f"\n{mode}")
+        for sess, r2 in scores[mode].items():
+            print(f"  {sess}: {r2:.4f}")
 
 print()
 print("Finished.")
