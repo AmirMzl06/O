@@ -397,7 +397,7 @@ for SESSION_FILE in sessions:
             adv_steps=10,
             attack_norm="l2",
             jacobian_weight=0,
-            adv_aggregate=False,
+            adv_aggregate=True,
         )
     
         model.fit(tr_data, train_label)
