@@ -20,7 +20,7 @@ RESULT_DIR     = "results_monkey"
 REPO_DIR       = "CEBRA"
 N_FAKE         = 0
 adv_epsilon    = 0.5
-MAX_ITER       = 1000
+MAX_ITER       = 1600
 OUTPUT_DIM     = 48
 BATCH_SIZE     = 512
 N_ELEC         = 96
@@ -384,7 +384,7 @@ for training_mode, adv in [("clean", False), ("adversarial", True)]:
         adv_epsilon=adv_epsilon,
         adv_steps=10,
         attack_norm="l2",
-        jacobian_weight=0.01,
+        jacobian_weight=0,
         adv_aggregate=True,
     )
 
