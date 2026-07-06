@@ -19,8 +19,8 @@ from scipy.ndimage import gaussian_filter1d
 DATASET_DIR = "monkey_dataset"
 
 sessions = [
-    Path(DATASET_DIR) / "Jango_20150730_001.mat",
-    # Path(DATASET_DIR) / "Jango_20150731_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150730_001.mat",
+    Path(DATASET_DIR) / "Jango_20150731_001.mat",
     # Path(DATASET_DIR) / "Jango_20150801_001.mat",
     # Path(DATASET_DIR) / "Jango_20150805_001.mat",
     # Path(DATASET_DIR) / "Jango_20150806_001.mat",
