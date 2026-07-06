@@ -223,8 +223,10 @@ def add_fake_neurons(train_data, test_data, key, fake_store, n_fake=N_FAKE):
     positions = np.sort(
         rng.choice(n_real + n_fake, size=n_fake, replace=False))
     fake_store[key] = positions
-    train_data = insert_fake_at_positions(train_data, positions, rng)
-    test_data  = insert_fake_at_positions(test_data,  positions, rng)
+    mu = train_data.mean()
+    sigma = train_data.std()
+    train_data = insert_fake_at_positions(train_data, positions, rng, mu=mu, sigma = sigma)
+    test_data  = insert_fake_at_positions(test_data,  positions, rng, mu=mu, sigma = sigma)
     return train_data, test_data, positions
 
 
