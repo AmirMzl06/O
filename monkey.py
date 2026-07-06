@@ -29,7 +29,7 @@ sessions = [
 
 RESULT_DIR     = "results_monkey"
 REPO_DIR       = "CEBRA"
-N_FAKE         = 0
+N_FAKE         = 10
 adv_epsilon    = 0.5
 MAX_ITER       = 1500
 OUTPUT_DIM     = 48
