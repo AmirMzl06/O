@@ -241,7 +241,7 @@ def get_torch_model(model):
 ##############################################
 ##############################################
 
-def zero_out_random_neurons(test_data, drop_ratio=0.2, fake_positions=None):
+def zero_out_random_neurons(test_data, drop_ratio=0.05, fake_positions=None):
     n_neurons = test_data.shape[1]
     all_indices = list(range(n_neurons))
     
