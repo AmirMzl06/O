@@ -20,11 +20,11 @@ DATASET_DIR = "monkey_dataset"
 
 sessions = [
     Path(DATASET_DIR) / "Jango_20150730_001.mat",
-    Path(DATASET_DIR) / "Jango_20150731_001.mat",
-    Path(DATASET_DIR) / "Jango_20150801_001.mat",
-    Path(DATASET_DIR) / "Jango_20150805_001.mat",
-    Path(DATASET_DIR) / "Jango_20150806_001.mat",
-    Path(DATASET_DIR) / "Jango_20150807_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150731_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150801_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150805_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150806_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150807_001.mat",
 ]
 
 RESULT_DIR     = "results_monkey"
@@ -396,7 +396,7 @@ for SESSION_FILE in sessions:
             adv_epsilon=adv_epsilon,
             adv_steps=10,
             attack_norm="l2",
-            jacobian_weight=0.01,
+            jacobian_weight=0,
             adv_aggregate=False,
         )
     
