@@ -5,7 +5,6 @@ import subprocess
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_auc_score
 
 # ============================================================
 # 1. CONFIG & PATCH CEBRA
@@ -13,7 +12,7 @@ from sklearn.metrics import roc_auc_score
 REPO_DIR       = "CEBRA"
 adv_epsilon    = 0.5
 MAX_ITER       = 1000
-OUTPUT_DIM     = 3
+OUTPUT_DIM     = 80
 BATCH_SIZE     = 512
 
 # ── Patch CEBRA ─────────────────────────────────────────────
@@ -113,60 +112,14 @@ def get_torch_model(model):
     torch_model.eval()
     return torch_model
 
-def compute_attribution(model, neural_np, batch_size=256, num_samples=2000):
-    neural_t = torch.from_numpy(neural_np).float().to(device)
-    neural_t.requires_grad_(True)
-    torch_model = get_torch_model(model)
-    
-    method = cebra.attribution.init(
-        name="jacobian-based-batched",
-        model=torch_model,
-        input_data=neural_t,
-        output_dimension=torch_model.num_output,
-        num_samples=num_samples,
-    )
-    
-    attr = method.compute_attribution_map(batch_size=batch_size)
-    
-    jf_mean = np.abs(attr.get("jf", np.zeros_like(neural_np))).mean(axis=0)
-    jfinv_mean = np.abs(attr.get("jf-inv-svd", np.zeros_like(neural_np))).mean(axis=0)
-    
-    if "jf-conv-abs-inv" in attr:
-        jfconv_mean = np.abs(attr["jf-conv-abs-inv"]).mean(axis=0)
-    else:
-        jfconv_mean = np.zeros_like(jf_mean)
-        
-    del method
-    torch.cuda.empty_cache()
-    
-    return {
-        "jf": jf_mean,
-        "jfinv": jfinv_mean,
-        "jfconvabsinv": jfconv_mean,
-        "raw_attr": attr
-    }
-
-def print_auc_scores(mode, attr_dict, n_signal=80, n_total=120):
-    y_true = np.zeros(n_total)
-    y_true[:n_signal] = 1.0
-
-    print(f"\n--- AUC Scores ({mode}) ---")
-    
-    auc_jf = roc_auc_score(y_true, attr_dict["jf"])
-    print(f"auc_jf,             {auc_jf:.2f}")
-    
-    auc_jfinv = roc_auc_score(y_true, attr_dict["jfinv"])
-    print(f"auc_jfinv,          {auc_jfinv:.2f}")
-    
-    if np.any(attr_dict["jfconvabsinv"]):
-        auc_jfconv = roc_auc_score(y_true, attr_dict["jfconvabsinv"])
-        print(f"auc_jfconvabsinv,   {auc_jfconv:.2f}")
-
 
 # ============================================================
 # 4. MAIN PIPELINE (TRAINING & ATTRIBUTION)
 # ============================================================
 results = {}
+
+ground_truth_attribution = (W.sum(axis=0) > 0).astype(float)
+print(f"Derived Ground Truth Attribution Mask Shape: {ground_truth_attribution.shape}")
 
 for training_mode, adv in [("clean", False), ("adversarial", True)]:
     print("\n" + "=" * 60)
@@ -190,19 +143,55 @@ for training_mode, adv in [("clean", False), ("adversarial", True)]:
         adv_steps=10,
         attack_norm="l2",
         jacobian_weight=0,
-        adv_aggregate=False,
+        adv_aggregate=True,
     )
 
     model.fit(neural, position)
     
     print(f"\nComputing Attribution for {training_mode}...")
-    attr_results = compute_attribution(model, neural)
+    neural_t = torch.from_numpy(neural).float().to(device)
+    neural_t.requires_grad_(True)
+    
+    torch_model = get_torch_model(model)
+    
+    method = cebra.attribution.init(
+        name="jacobian-based-batched",
+        model=torch_model,
+        input_data=neural_t,
+        output_dimension=torch_model.num_output,
+        num_samples=2000,
+    )
+    
+    attr = method.compute_attribution_map(batch_size=256)
+    
+    print("\n--- Diagnostic Prints ---")
+    print("Keys in attr dictionary:", list(attr.keys()))
+    if "jf" in attr:
+        print("jf shape:", attr["jf"].shape)
+    if "jf-inv-svd" in attr:
+        print("jf-inv-svd shape:", attr["jf-inv-svd"].shape)
+    if "jf-conv-abs-inv" in attr:
+        print("jf-conv-abs-inv shape:", attr["jf-conv-abs-inv"].shape)
+    print("-------------------------\n")
+
+    print(f"--- AUC Scores ({training_mode}) ---")
+    
+    if "jf" in attr:
+        auc_jf = method.compute_attribution_score(attr["jf"], ground_truth_attribution)
+        print(f"auc_jf,             {auc_jf:.2f}")
+        
+    if "jf-inv-svd" in attr:
+        auc_jfinv = method.compute_attribution_score(attr["jf-inv-svd"], ground_truth_attribution)
+        print(f"auc_jfinv,          {auc_jfinv:.2f}")
+        
+    if "jf-conv-abs-inv" in attr:
+        auc_jfconv = method.compute_attribution_score(attr["jf-conv-abs-inv"], ground_truth_attribution)
+        print(f"auc_jfconvabsinv,   {auc_jfconv:.2f}")
     
     mode_key = "adv" if adv else "clean"
-    results[mode_key] = attr_results
+    results[mode_key] = attr
     
-    print_auc_scores(mode_key, attr_results, n_signal=80, n_total=120)
-    
+    del method
     del model
     torch.cuda.empty_cache()
 
@@ -212,12 +201,12 @@ for training_mode, adv in [("clean", False), ("adversarial", True)]:
 # ============================================================
 print("\nPlotting Results...")
 
-clean_map = np.abs(results["clean"]["raw_attr"]["jf-inv-svd"]).mean(axis=0, keepdims=True)
-adv_map   = np.abs(results["adv"]["raw_attr"]["jf-inv-svd"]).mean(axis=0, keepdims=True)
+clean_map = np.abs(results["clean"]["jf-inv-svd"]).mean(axis=0, keepdims=True)
+adv_map   = np.abs(results["adv"]["jf-inv-svd"]).mean(axis=0, keepdims=True)
 
 fig, axs = plt.subplots(3, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [2, 1, 1]})
 
-# 1. Ground Truth
+# 1. Ground Truth W
 im0 = axs[0].matshow(W, aspect="auto", cmap="Greys")
 axs[0].set_title("Ground Truth Mapping (W)", pad=10)
 axs[0].set_ylabel("Latents (80)")
@@ -226,14 +215,14 @@ fig.colorbar(im0, ax=axs[0])
 
 # 2. Clean JF-inv
 im1 = axs[1].matshow(clean_map, aspect="auto", cmap="Reds")
-axs[1].set_title("Clean Model: JF-inv Attribution (Averaged across embedding dims)", pad=10)
+axs[1].set_title("Clean Model: JF-inv Attribution Map", pad=10)
 axs[1].set_ylabel("Importance")
 axs[1].set_yticks([])
 fig.colorbar(im1, ax=axs[1])
 
 # 3. Adversarial JF-inv
 im2 = axs[2].matshow(adv_map, aspect="auto", cmap="Blues")
-axs[2].set_title("Adversarial Model: JF-inv Attribution (Averaged across embedding dims)", pad=10)
+axs[2].set_title("Adversarial Model: JF-inv Attribution Map", pad=10)
 axs[2].set_ylabel("Importance")
 axs[2].set_xlabel("Neurons (120)")
 axs[2].set_yticks([])
