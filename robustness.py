@@ -428,7 +428,7 @@ for SESSION_FILE in sessions:
         r2_normal = compute_decoder_score(
             model, tr_data, te_data, train_label, test_label)
         
-        te_data_dropped = zero_out_random_neurons(te_data, drop_ratio=0.2, fake_positions=fake_positions)
+        te_data_dropped = zero_out_random_neurons(te_data, drop_ratio=0.05, fake_positions=fake_positions)
         
         r2_robust = compute_decoder_score(
             model, tr_data, te_data_dropped, train_label, test_label)
