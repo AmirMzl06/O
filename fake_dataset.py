@@ -8,20 +8,10 @@ from pathlib import Path
 import h5py
 import numpy as np
 import torch
+import torch.nn as nn
 import matplotlib.pyplot as plt
 from scipy.stats import zscore
 from scipy.ndimage import gaussian_filter1d
-
-# ============================================================
-# CONFIG
-# ============================================================
-import os
-import numpy as np
-import torch
-import torch.nn as nn
-import cebra
-from cebra import CEBRA
-from scipy.stats import zscore
 
 # ============================================================
 # CONFIG
@@ -32,8 +22,8 @@ D1 = 3
 D2 = 3
 D_LATENT = D1 + D2
 
-N1 = 3
-N2 = 3
+N1 = 25
+N2 = 25
 D_OBS = N1 + N2
 
 N_MLP_LAYERS = 4
@@ -44,28 +34,29 @@ BATCH_SIZE = 5000
 MAX_ITER = 50
 adv_epsilon = 0.1
 
+REPO_DIR = "CEBRA"
 RESULT_DIR = "results_synthetic"
 os.makedirs(RESULT_DIR, exist_ok=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# ── Patch CEBRA ─────────────────────────────────────────────
+# ============================================================
+# PATCH CEBRA
+# ============================================================
 if not os.path.exists(REPO_DIR):
     subprocess.run([
         "git", "clone",
         "https://github.com/AdaptiveMotorControlLab/CEBRA.git",
     ], check=True)
 
-shutil.copy("base.py",
-            os.path.join(REPO_DIR, "cebra/solver/base.py"))
-shutil.copy("cebra.py",
-            os.path.join(REPO_DIR, "cebra/integrations/sklearn/cebra.py"))
-shutil.copy("cebra.py",
-            os.path.join(REPO_DIR, "cebra/cebra.py"))
+shutil.copy("base.py", os.path.join(REPO_DIR, "cebra/solver/base.py"))
+shutil.copy("cebra.py", os.path.join(REPO_DIR, "cebra/integrations/sklearn/cebra.py"))
+shutil.copy("cebra.py", os.path.join(REPO_DIR, "cebra/cebra.py"))
 
 base_path = os.path.join(REPO_DIR, "cebra/solver/base.py")
 with open(base_path, "r") as f:
     content = f.read()
+
 if "AuxiliaryVariableSolver" not in content:
     with open(base_path, "a") as f:
         f.write("\nclass AuxiliaryVariableSolver(Solver):\n    pass\n")
@@ -74,6 +65,7 @@ if "AuxiliaryVariableSolver" not in content:
 print("Patch applied.")
 
 sys.path.insert(0, REPO_DIR)
+
 if "cebra" in sys.modules:
     del sys.modules["cebra"]
 
@@ -83,9 +75,7 @@ from cebra import CEBRA
 from decoder import TwoLayerMLP
 
 print("CEBRA:", cebra.__version__)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
-
 
 
 def make_mlp(in_dim, out_dim, n_layers=4, seed=0):
