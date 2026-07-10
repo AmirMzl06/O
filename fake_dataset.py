@@ -22,8 +22,8 @@ D1 = 3
 D2 = 3
 D_LATENT = D1 + D2
 
-N1 = 25
-N2 = 25
+N1 = 2
+N2 = 2
 D_OBS = N1 + N2
 
 N_MLP_LAYERS = 4
@@ -31,7 +31,7 @@ SIGMA_EPS = 0.03
 
 OUTPUT_DIM = D_LATENT
 BATCH_SIZE = 5000
-MAX_ITER = 50
+MAX_ITER = 1500
 adv_epsilon = 0.1
 
 REPO_DIR = "CEBRA"
