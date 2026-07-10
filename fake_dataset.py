@@ -245,7 +245,7 @@ for i in jacobain_weight:
             adv_epsilon=adv_epsilon,
             adv_steps=10,
             attack_norm="l2",
-            jacobian_weight=0.5,
+            jacobian_weight=i,
             adv_aggregate=False,
         )
     
