@@ -221,8 +221,9 @@ print(gt_attr.shape)
 print(gt_attr_bool.shape)
 
 results = {}
-jacobain_weight = [0,0.1,,0.3,0.5,0.7,0.9]
+jacobain_weight = [0,0.1,0.3,0.5,0.7,0.9]
 for i in jacobain_weight:
+    print(f"jacobian weight = {i}")
     for training_mode, adv in [("clean", False), ("adversarial", True)]:
         print("\n" + "=" * 60)
         print(f"Training: {training_mode.upper()}")
@@ -252,7 +253,7 @@ for i in jacobain_weight:
     
     
         print("\nComputing attribution...")
-        print(f"jacobian weight = {i}")
+        # print(f"jacobian weight = {i}")
         mode_key = "adv" if adv else "clean"
         results[mode_key] = compute_attribution(model, y_obs, gt_attr_bool)
         print(f"AUC jf    = {results[mode_key]['auc_jf']:.4f}")
