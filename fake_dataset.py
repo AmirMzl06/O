@@ -221,43 +221,45 @@ print(gt_attr.shape)
 print(gt_attr_bool.shape)
 
 results = {}
-
-for training_mode, adv in [("clean", False), ("adversarial", True)]:
-    print("\n" + "=" * 60)
-    print(f"Training: {training_mode.upper()}")
-    print("=" * 60)
-
-    torch.manual_seed(0)
-    np.random.seed(0)
-
-    model = CEBRA(
-        batch_size=BATCH_SIZE,
-        temperature=0.4,
-        model_architecture="offset36-model",
-        time_offsets=4,
-        max_iterations=MAX_ITER,
-        output_dimension=OUTPUT_DIM,
-        verbose=True,
-        training_mode=training_mode,
-        adv_alpha=adv_epsilon / 5,
-        adv_epsilon=adv_epsilon,
-        adv_steps=10,
-        attack_norm="l2",
-        jacobian_weight=0.5,
-        adv_aggregate=False,
-    )
-
-    model.fit(y_obs, label)
-
-
-    print("\nComputing attribution...")
-    mode_key = "adv" if adv else "clean"
-    results[mode_key] = compute_attribution(model, y_obs, gt_attr_bool)
-    print(f"AUC jf    = {results[mode_key]['auc_jf']:.4f}")
-    print(f"AUC jfinv = {results[mode_key]['auc_jfinv']:.4f}")
-
-    del model
-    torch.cuda.empty_cache()
+jacobain_weight = [0,0.1,,0.3,0.5,0.7,0.9]
+for i in jacobain_weight:
+    for training_mode, adv in [("clean", False), ("adversarial", True)]:
+        print("\n" + "=" * 60)
+        print(f"Training: {training_mode.upper()}")
+        print("=" * 60)
+    
+        torch.manual_seed(0)
+        np.random.seed(0)
+    
+        model = CEBRA(
+            batch_size=BATCH_SIZE,
+            temperature=0.4,
+            model_architecture="offset36-model",
+            time_offsets=4,
+            max_iterations=MAX_ITER,
+            output_dimension=OUTPUT_DIM,
+            verbose=True,
+            training_mode=training_mode,
+            adv_alpha=adv_epsilon / 5,
+            adv_epsilon=adv_epsilon,
+            adv_steps=10,
+            attack_norm="l2",
+            jacobian_weight=0.5,
+            adv_aggregate=False,
+        )
+    
+        model.fit(y_obs, label)
+    
+    
+        print("\nComputing attribution...")
+        print(f"jacobian weight = {i}")
+        mode_key = "adv" if adv else "clean"
+        results[mode_key] = compute_attribution(model, y_obs, gt_attr_bool)
+        print(f"AUC jf    = {results[mode_key]['auc_jf']:.4f}")
+        print(f"AUC jfinv = {results[mode_key]['auc_jfinv']:.4f}")
+    
+        del model
+        torch.cuda.empty_cache()
 
 
 # from typing_extensions import List
