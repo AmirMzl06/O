@@ -20,10 +20,10 @@ DATASET_DIR = "dataset"
 RESULT_DIR = "results"
 
 rats = [
-    "achilles",
-    # "buddy",
-    # "cicero",
-    # "gatsby"
+    # "achilles",
+    "buddy",
+    "cicero",
+    "gatsby"
 ]
 
 adv_epsilon = 0.5
