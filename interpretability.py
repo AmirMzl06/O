@@ -19,11 +19,11 @@ DATASET_DIR = "monkey_dataset"
 
 sessions = [
     Path(DATASET_DIR) / "Jango_20150730_001.mat",
-    Path(DATASET_DIR) / "Jango_20150731_001.mat",
-    Path(DATASET_DIR) / "Jango_20150801_001.mat",
-    Path(DATASET_DIR) / "Jango_20150805_001.mat",
-    Path(DATASET_DIR) / "Jango_20150806_001.mat",
-    Path(DATASET_DIR) / "Jango_20150807_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150731_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150801_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150805_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150806_001.mat",
+    # Path(DATASET_DIR) / "Jango_20150807_001.mat",
 ]
 
 RESULT_DIR   = "results_monkey_recon"
@@ -31,14 +31,14 @@ REPO_DIR     = "CEBRA"
 
 N_FAKE       = 0
 adv_epsilon  = 0.5
-MAX_ITER     = 1500
+MAX_ITER     = 3000
 OUTPUT_DIM   = 48
 BATCH_SIZE   = 512
 N_ELEC       = 96
 BIN_SIZE_MS  = 50
 SMOOTH_SD_MS = 100
 
-RECON_EPOCHS = 1000
+RECON_EPOCHS = 6000
 RECON_LR     = 1e-2
 RECON_HIDDEN = 0   # linear decoder only
 
