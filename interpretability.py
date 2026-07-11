@@ -21,9 +21,9 @@ RESULT_DIR = "results"
 
 rats = [
     "achilles",
-    "buddy",
-    "cicero",
-    "gatsby"
+    # "buddy",
+    # "cicero",
+    # "gatsby"
 ]
 
 adv_epsilon = 0.5
