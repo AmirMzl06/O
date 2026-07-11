@@ -8,89 +8,83 @@ import json
 import joblib
 import numpy as np
 import torch
-import torch.nn as nn
 import matplotlib.pyplot as plt
 
 # ============================================================
 # CONFIG
 # ============================================================
-
 REPO_DIR = "CEBRA"
 DATASET_DIR = "dataset"
 RESULT_DIR = "results_latent_noise"
 
-rats = [
-"achilles",
-# "buddy",
-# "cicero",
-# "gatsby"
+RATS = [
+    "achilles",
+    # "buddy",
+    # "cicero",
+    # "gatsby",
 ]
 
-adv_epsilon = 0.1
-N_FAKE = 0
-
-MAX_ITER = 1000
+ADV_EPSILON = 0.1
+MAX_ITER = 1500
 OUTPUT_DIM = 48
 BATCH_SIZE = 2048
 
 # Noise settings
-
 NOISE_LEVELS = [0.00, 0.05, 0.10, 0.20, 0.50]
 N_NOISE_REPEATS = 5
-NOISE_CLIP_MIN = 0.0
+NOISE_CLIP_MIN = 0.0  # suitable for spike counts / firing rates
 
 os.makedirs(RESULT_DIR, exist_ok=True)
 
 # ============================================================
-
 # PATCH CEBRA
-
 # ============================================================
-
 if not os.path.exists(REPO_DIR):
-subprocess.run([
-"git",
-"clone",
-"https://github.com/AdaptiveMotorControlLab/CEBRA.git"
-], check=True)
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "https://github.com/AdaptiveMotorControlLab/CEBRA.git",
+        ],
+        check=True,
+    )
 
 # These two files are from your local patched version
-
 shutil.copy(
-"base.py",
-os.path.join(REPO_DIR, "cebra/solver/base.py")
+    "base.py",
+    os.path.join(REPO_DIR, "cebra/solver/base.py"),
 )
 
 shutil.copy(
-"cebra.py",
-os.path.join(REPO_DIR, "cebra/integrations/sklearn/cebra.py")
+    "cebra.py",
+    os.path.join(REPO_DIR, "cebra/integrations/sklearn/cebra.py"),
 )
 
 shutil.copy(
-"cebra.py",
-os.path.join(REPO_DIR, "cebra/cebra.py")
+    "cebra.py",
+    os.path.join(REPO_DIR, "cebra/cebra.py"),
 )
 
 base_path = os.path.join(REPO_DIR, "cebra/solver/base.py")
 with open(base_path, "r") as f:
-content = f.read()
+    content = f.read()
 
 if "AuxiliaryVariableSolver" not in content:
-with open(base_path, "a") as f:
-f.write("\nclass AuxiliaryVariableSolver(Solver):\n    pass\n")
-f.write("\nclass DiscreteAuxiliaryVariableSolver(Solver):\n    pass\n")
+    with open(base_path, "a") as f:
+        f.write("\nclass AuxiliaryVariableSolver(Solver):\n    pass\n")
+        f.write("\nclass DiscreteAuxiliaryVariableSolver(Solver):\n    pass\n")
 
 print("Patch applied.")
 
 sys.path.insert(0, REPO_DIR)
 
 if "cebra" in sys.modules:
-del sys.modules["cebra"]
+    del sys.modules["cebra"]
 
 import cebra
 from cebra import CEBRA
 
-print("CEBRA:", cebra.**version**)
+print("CEBRA:", cebra.__version__)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
@@ -98,371 +92,342 @@ print("Device:", device)
 # ============================================================
 # HELPERS
 # ============================================================
-
 def setup_seed(seed=42):
-torch.manual_seed(seed)
-np.random.seed(seed)
-random.seed(seed)
-if torch.cuda.is_available():
-torch.cuda.manual_seed_all(seed)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
 
 def load_local_rat_dataset(name, dataset_dir=DATASET_DIR):
-path = os.path.join(dataset_dir, f"{name}.jl")
-data = joblib.load(path)
+    path = os.path.join(dataset_dir, f"{name}.jl")
+    data = joblib.load(path)
 
-```
-spikes = data["spikes"].astype(np.float32)
-position = data["position"].astype(np.float32)
+    spikes = data["spikes"].astype(np.float32)
+    position = data["position"].astype(np.float32)
 
-if position.ndim == 1:
-    position = position[:, None]
+    if position.ndim == 1:
+        position = position[:, None]
 
-print(f"{name}: spikes={spikes.shape}  position={position.shape}")
-return spikes, position
-```
+    print(f"{name}: spikes={spikes.shape}  position={position.shape}")
+    return spikes, position
 
-def insert_fake_at_positions(x, positions, rng, mu, sigma):
-n_total = x.shape[1] + len(positions)
-is_fake = np.zeros(n_total, dtype=bool)
-is_fake[positions] = True
 
-```
-fake_values = rng.normal(
-    loc=mu,
-    scale=sigma,
-    size=(x.shape[0], len(positions)),
-)
+def add_fake_neurons(train_data, test_data, n_fake=0):
+    """Disabled by default. Kept here so the pipeline can be extended later."""
+    if n_fake == 0:
+        return train_data, test_data, np.array([], dtype=int)
 
-combined = np.zeros((x.shape[0], n_total), dtype=np.float32)
-combined[:, is_fake] = fake_values
-combined[:, ~is_fake] = x
-return combined
-```
-
-def add_fake_neurons(train_data, test_data, key, n_fake=N_FAKE):
-if n_fake == 0:
-return train_data, test_data, np.array([], dtype=int)
-
-```
-rng = np.random.default_rng(0)
-n_real = train_data.shape[1]
-
-positions = np.sort(
-    rng.choice(
-        n_real + n_fake,
-        size=n_fake,
-        replace=False,
+    rng = np.random.default_rng(0)
+    n_real = train_data.shape[1]
+    positions = np.sort(
+        rng.choice(
+            n_real + n_fake,
+            size=n_fake,
+            replace=False,
+        )
     )
-)
 
-mu = 0.0
-sigma = 1.0
+    def insert_fake_at_positions(x, positions, rng, mu, sigma):
+        n_total = x.shape[1] + len(positions)
+        is_fake = np.zeros(n_total, dtype=bool)
+        is_fake[positions] = True
 
-train_data = insert_fake_at_positions(train_data, positions, rng, mu, sigma)
-test_data = insert_fake_at_positions(test_data, positions, rng, mu, sigma)
-return train_data, test_data, positions
-```
+        fake_values = rng.normal(
+            loc=mu,
+            scale=sigma,
+            size=(x.shape[0], len(positions)),
+        )
 
-def get_torch_model(model):
-torch_model = model.solver_.model
-torch_model.split_outputs = False
-torch_model.to(device)
-torch_model.eval()
-return torch_model
+        combined = np.zeros((x.shape[0], n_total), dtype=np.float32)
+        combined[:, is_fake] = fake_values
+        combined[:, ~is_fake] = x
+        return combined
 
-def add_gaussian_noise(x, noise_level, rng, ref_std=None, clip_min=None):
-"""
-noise_level: multiplier on ref_std if provided, else absolute sigma.
-"""
-if ref_std is None:
-sigma = noise_level
-else:
-sigma = noise_level * ref_std
+    mu = 0.0
+    sigma = 1.0
+    train_data = insert_fake_at_positions(train_data, positions, rng, mu, sigma)
+    test_data = insert_fake_at_positions(test_data, positions, rng, mu, sigma)
+    return train_data, test_data, positions
 
-```
-noisy = x + rng.normal(loc=0.0, scale=sigma, size=x.shape).astype(np.float32)
-
-if clip_min is not None:
-    noisy = np.clip(noisy, clip_min, None)
-
-return noisy.astype(np.float32)
-```
 
 def get_latent(model, data_np):
-z = model.transform(data_np)
-return np.asarray(z, dtype=np.float32)
+    z = model.transform(data_np)
+    return np.asarray(z, dtype=np.float32)
+
+
+def add_gaussian_noise(x, noise_level, rng, ref_std=None, clip_min=None):
+    """
+    If ref_std is provided, noise_level multiplies the per-feature std.
+    Otherwise noise_level is used as an absolute sigma.
+    """
+    if ref_std is None:
+        sigma = noise_level
+    else:
+        sigma = noise_level * ref_std
+
+    noisy = x + rng.normal(loc=0.0, scale=sigma, size=x.shape).astype(np.float32)
+
+    if clip_min is not None:
+        noisy = np.clip(noisy, clip_min, None)
+
+    return noisy.astype(np.float32)
+
 
 def latent_shift_metrics(z_clean, z_noisy):
-"""
-z_clean, z_noisy: (T, D)
-"""
-diff = z_noisy - z_clean
+    """Compare latent representations sample-by-sample."""
+    diff = z_noisy - z_clean
 
-```
-mse = float(np.mean(diff ** 2))
-rmse = float(np.sqrt(mse))
-l2_per_sample = np.linalg.norm(diff, axis=1)
-mean_l2 = float(np.mean(l2_per_sample))
+    mse = float(np.mean(diff ** 2))
+    rmse = float(np.sqrt(mse))
+    l2_per_sample = np.linalg.norm(diff, axis=1)
+    mean_l2 = float(np.mean(l2_per_sample))
 
-clean_norm = np.linalg.norm(z_clean, axis=1)
-rel_l2 = float(mean_l2 / (np.mean(clean_norm) + 1e-8))
+    clean_norm = np.linalg.norm(z_clean, axis=1)
+    rel_l2 = float(mean_l2 / (np.mean(clean_norm) + 1e-8))
 
-# cosine similarity per sample
-num = np.sum(z_clean * z_noisy, axis=1)
-den = (np.linalg.norm(z_clean, axis=1) * np.linalg.norm(z_noisy, axis=1) + 1e-8)
-cosine = float(np.mean(num / den))
+    num = np.sum(z_clean * z_noisy, axis=1)
+    den = np.linalg.norm(z_clean, axis=1) * np.linalg.norm(z_noisy, axis=1) + 1e-8
+    cosine = float(np.mean(num / den))
 
-return {
-    "latent_mse": mse,
-    "latent_rmse": rmse,
-    "latent_mean_l2": mean_l2,
-    "latent_relative_l2": rel_l2,
-    "latent_cosine": cosine,
-}
-```
+    return {
+        "latent_mse": mse,
+        "latent_rmse": rmse,
+        "latent_mean_l2": mean_l2,
+        "latent_relative_l2": rel_l2,
+        "latent_cosine": cosine,
+    }
+
 
 def save_noise_curve_plot(rat, mode, results, save_dir):
-"""
-results: list of dicts with keys:
-noise_level, latent_mse_mean, latent_mse_std, latent_mean_l2_mean, ...
-"""
-os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
 
-```
-noise_levels = [r["noise_level"] for r in results]
-mean_l2 = [r["latent_mean_l2_mean"] for r in results]
-std_l2 = [r["latent_mean_l2_std"] for r in results]
-mse = [r["latent_mse_mean"] for r in results]
-std_mse = [r["latent_mse_std"] for r in results]
-cosine = [r["latent_cosine_mean"] for r in results]
-std_cosine = [r["latent_cosine_std"] for r in results]
+    noise_levels = [r["noise_level"] for r in results]
+    mean_l2 = [r["latent_mean_l2_mean"] for r in results]
+    std_l2 = [r["latent_mean_l2_std"] for r in results]
+    mse = [r["latent_mse_mean"] for r in results]
+    std_mse = [r["latent_mse_std"] for r in results]
+    cosine = [r["latent_cosine_mean"] for r in results]
+    std_cosine = [r["latent_cosine_std"] for r in results]
 
-fig, axs = plt.subplots(1, 3, figsize=(16, 4.5))
+    fig, axs = plt.subplots(1, 3, figsize=(16, 4.5))
 
-axs[0].errorbar(noise_levels, mean_l2, yerr=std_l2, marker="o", capsize=3)
-axs[0].set_title("Mean latent L2 shift")
-axs[0].set_xlabel("Noise level")
-axs[0].set_ylabel("Shift")
+    axs[0].errorbar(noise_levels, mean_l2, yerr=std_l2, marker="o", capsize=3)
+    axs[0].set_title("Mean latent L2 shift")
+    axs[0].set_xlabel("Noise level")
+    axs[0].set_ylabel("Shift")
 
-axs[1].errorbar(noise_levels, mse, yerr=std_mse, marker="o", capsize=3)
-axs[1].set_title("Latent MSE")
-axs[1].set_xlabel("Noise level")
-axs[1].set_ylabel("MSE")
+    axs[1].errorbar(noise_levels, mse, yerr=std_mse, marker="o", capsize=3)
+    axs[1].set_title("Latent MSE")
+    axs[1].set_xlabel("Noise level")
+    axs[1].set_ylabel("MSE")
 
-axs[2].errorbar(noise_levels, cosine, yerr=std_cosine, marker="o", capsize=3)
-axs[2].set_title("Latent cosine similarity")
-axs[2].set_xlabel("Noise level")
-axs[2].set_ylabel("Cosine")
+    axs[2].errorbar(noise_levels, cosine, yerr=std_cosine, marker="o", capsize=3)
+    axs[2].set_title("Latent cosine similarity")
+    axs[2].set_xlabel("Noise level")
+    axs[2].set_ylabel("Cosine")
 
-plt.suptitle(f"{rat} — {mode} — latent stability under noise", fontsize=13)
-plt.tight_layout()
+    plt.suptitle(f"{rat} — {mode} — latent stability under noise", fontsize=13)
+    plt.tight_layout()
 
-out_path = os.path.join(save_dir, f"latent_noise_curve_{mode}.png")
-plt.savefig(out_path, dpi=300)
-plt.close()
-print(f"Saved plot -> {out_path}")
-```
+    out_path = os.path.join(save_dir, f"latent_noise_curve_{mode}.png")
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+    print(f"Saved plot -> {out_path}")
+
 
 def print_summary_table(all_results):
-print()
-print("=" * 88)
-print("LATENT STABILITY SUMMARY")
-print("=" * 88)
-for rat, rat_res in all_results.items():
-print(f"\n{rat}")
-for mode in ["clean", "adv"]:
-if mode not in rat_res:
-continue
-print(f"  {mode}")
-for row in rat_res[mode]:
-print(
-f"    noise={row['noise_level']:.2f} | "
-f"L2={row['latent_mean_l2_mean']:.6f} ± {row['latent_mean_l2_std']:.6f} | "
-f"MSE={row['latent_mse_mean']:.6f} ± {row['latent_mse_std']:.6f} | "
-f"Cos={row['latent_cosine_mean']:.4f} ± {row['latent_cosine_std']:.4f}"
-)
-print("=" * 88)
-print()
+    print()
+    print("=" * 88)
+    print("LATENT STABILITY SUMMARY")
+    print("=" * 88)
+    for rat, rat_res in all_results.items():
+        print(f"\n{rat}")
+        for mode in ["clean", "adv"]:
+            if mode not in rat_res:
+                continue
+            print(f"  {mode}")
+            for row in rat_res[mode]:
+                print(
+                    f"    noise={row['noise_level']:.2f} | "
+                    f"L2={row['latent_mean_l2_mean']:.6f} ± {row['latent_mean_l2_std']:.6f} | "
+                    f"MSE={row['latent_mse_mean']:.6f} ± {row['latent_mse_std']:.6f} | "
+                    f"Cos={row['latent_cosine_mean']:.4f} ± {row['latent_cosine_std']:.4f}"
+                )
+    print("=" * 88)
+    print()
+
 
 # ============================================================
 # MAIN PIPELINE
 # ============================================================
-
 all_results = {}
 
 for training_mode, adv in [
-("clean", False),
-("adversarial", True),
+    ("clean", False),
+    ("adversarial", True),
 ]:
-print("=" * 80)
-print(training_mode.upper())
-print("=" * 80)
+    print("=" * 80)
+    print(training_mode.upper())
+    print("=" * 80)
 
-```
-for name in rats:
-    print(f"\nTraining {name} ...")
+    for name in RATS:
+        print(f"\nTraining {name} ...")
 
-    spikes, position = load_local_rat_dataset(name)
+        spikes, position = load_local_rat_dataset(name)
+        split = int(0.8 * len(spikes))
+        train_data = spikes[:split]
+        test_data = spikes[split:]
 
-    split = int(0.8 * len(spikes))
-    train_data = spikes[:split]
-    test_data = spikes[split:]
+        train_label = position[:split, :2]
+        test_label = position[split:, :2]
 
-    train_label = position[:split, :2]
-    test_label = position[split:, :2]
+        train_data, test_data, fake_positions = add_fake_neurons(
+            train_data,
+            test_data,
+            n_fake=N_FAKE,
+        )
+        if len(fake_positions) > 0:
+            print("Fake neurons:", fake_positions)
+        else:
+            print("No fake neurons.")
 
-    # Optional fake neurons (off by default)
-    key = f"{name}_adv" if adv else name
-    train_data, test_data, fake_positions = add_fake_neurons(train_data, test_data, key)
-    if len(fake_positions) > 0:
-        print("Fake neurons:", fake_positions)
-    else:
-        print("No fake neurons.")
+        setup_seed(0)
+        model = CEBRA(
+            batch_size=BATCH_SIZE,
+            temperature=0.4,
+            model_architecture="offset36-model-more-dropout",
+            time_offsets=4,
+            max_iterations=MAX_ITER,
+            output_dimension=OUTPUT_DIM,
+            verbose=True,
+            training_mode=training_mode,
+            adv_alpha=ADV_EPSILON / 5,
+            adv_epsilon=ADV_EPSILON,
+            adv_steps=10,
+            attack_norm="l2",
+            jacobian_weight=0.01,
+            adv_aggregate=True,
+        )
+        model.fit(train_data, train_label)
 
-    setup_seed(0)
+        # Clean latent on test set
+        z_clean = get_latent(model, test_data)
 
-    model = CEBRA(
-        batch_size=BATCH_SIZE,
-        temperature=0.4,
-        model_architecture="offset36-model-more-dropout",
-        time_offsets=4,
-        max_iterations=MAX_ITER,
-        output_dimension=OUTPUT_DIM,
-        verbose=True,
-        training_mode=training_mode,
-        adv_alpha=adv_epsilon / 5,
-        adv_epsilon=adv_epsilon,
-        adv_steps=10,
-        attack_norm="l2",
-        jacobian_weight=0.5,
-        adv_aggregate=False,
-    )
-    model.fit(train_data, train_label)
+        # Reference scale for noise: per-neuron std from train set
+        train_std = train_data.std(axis=0, keepdims=True).astype(np.float32) + 1e-6
 
-    # Clean latent on test set
-    z_clean = get_latent(model, test_data)
+        rat_results = []
+        save_dir = os.path.join(RESULT_DIR, name, training_mode)
+        os.makedirs(save_dir, exist_ok=True)
 
-    # Reference scale for noise: per-neuron std from train set
-    train_std = train_data.std(axis=0, keepdims=True).astype(np.float32) + 1e-6
+        for noise_level in NOISE_LEVELS:
+            metrics_list = []
 
-    rat_results = []
-    save_dir = os.path.join(RESULT_DIR, name, training_mode)
-    os.makedirs(save_dir, exist_ok=True)
+            for rep in range(N_NOISE_REPEATS):
+                rng = np.random.default_rng(1000 + rep)
 
-    for noise_level in NOISE_LEVELS:
-        metrics_list = []
+                noisy_test = add_gaussian_noise(
+                    test_data,
+                    noise_level=noise_level,
+                    rng=rng,
+                    ref_std=train_std,
+                    clip_min=NOISE_CLIP_MIN,
+                )
 
-        for rep in range(N_NOISE_REPEATS):
-            rng = np.random.default_rng(1000 + rep)
+                z_noisy = get_latent(model, noisy_test)
+                metrics = latent_shift_metrics(z_clean, z_noisy)
+                metrics_list.append(metrics)
 
-            noisy_test = add_gaussian_noise(
-                test_data,
-                noise_level=noise_level,
-                rng=rng,
-                ref_std=train_std,
-                clip_min=NOISE_CLIP_MIN,
+            row = {
+                "noise_level": noise_level,
+                "latent_mse_mean": float(np.mean([m["latent_mse"] for m in metrics_list])),
+                "latent_mse_std": float(np.std([m["latent_mse"] for m in metrics_list])),
+                "latent_rmse_mean": float(np.mean([m["latent_rmse"] for m in metrics_list])),
+                "latent_rmse_std": float(np.std([m["latent_rmse"] for m in metrics_list])),
+                "latent_mean_l2_mean": float(np.mean([m["latent_mean_l2"] for m in metrics_list])),
+                "latent_mean_l2_std": float(np.std([m["latent_mean_l2"] for m in metrics_list])),
+                "latent_relative_l2_mean": float(np.mean([m["latent_relative_l2"] for m in metrics_list])),
+                "latent_relative_l2_std": float(np.std([m["latent_relative_l2"] for m in metrics_list])),
+                "latent_cosine_mean": float(np.mean([m["latent_cosine"] for m in metrics_list])),
+                "latent_cosine_std": float(np.std([m["latent_cosine"] for m in metrics_list])),
+            }
+            rat_results.append(row)
+
+            print(
+                f"{name} | {training_mode} | noise={noise_level:.2f} "
+                f"=> L2={row['latent_mean_l2_mean']:.6f} "
+                f"MSE={row['latent_mse_mean']:.6f} "
+                f"Cos={row['latent_cosine_mean']:.4f}"
             )
 
-            z_noisy = get_latent(model, noisy_test)
-            metrics = latent_shift_metrics(z_clean, z_noisy)
-            metrics_list.append(metrics)
-
-        row = {
-            "noise_level": noise_level,
-            "latent_mse_mean": float(np.mean([m["latent_mse"] for m in metrics_list])),
-            "latent_mse_std": float(np.std([m["latent_mse"] for m in metrics_list])),
-            "latent_rmse_mean": float(np.mean([m["latent_rmse"] for m in metrics_list])),
-            "latent_rmse_std": float(np.std([m["latent_rmse"] for m in metrics_list])),
-            "latent_mean_l2_mean": float(np.mean([m["latent_mean_l2"] for m in metrics_list])),
-            "latent_mean_l2_std": float(np.std([m["latent_mean_l2"] for m in metrics_list])),
-            "latent_relative_l2_mean": float(np.mean([m["latent_relative_l2"] for m in metrics_list])),
-            "latent_relative_l2_std": float(np.std([m["latent_relative_l2"] for m in metrics_list])),
-            "latent_cosine_mean": float(np.mean([m["latent_cosine"] for m in metrics_list])),
-            "latent_cosine_std": float(np.std([m["latent_cosine"] for m in metrics_list])),
-        }
-        rat_results.append(row)
-
-        print(
-            f"{name} | {training_mode} | noise={noise_level:.2f} "
-            f"=> L2={row['latent_mean_l2_mean']:.6f} "
-            f"MSE={row['latent_mse_mean']:.6f} "
-            f"Cos={row['latent_cosine_mean']:.4f}"
+        save_noise_curve_plot(
+            rat=name,
+            mode=training_mode,
+            results=rat_results,
+            save_dir=save_dir,
         )
 
-    # Save per-rat/mode plot
-    save_noise_curve_plot(
-        rat=name,
-        mode=training_mode,
-        results=rat_results,
-        save_dir=save_dir,
-    )
+        if name not in all_results:
+            all_results[name] = {}
+        all_results[name]["clean" if training_mode == "clean" else "adv"] = rat_results
 
-    # Save JSON summary
-    if name not in all_results:
-        all_results[name] = {}
-    all_results[name][training_mode if training_mode == "clean" else "adv"] = rat_results
+        summary_path = os.path.join(save_dir, f"latent_noise_summary_{training_mode}.json")
+        with open(summary_path, "w") as f:
+            json.dump(rat_results, f, indent=2)
+        print(f"Saved summary -> {summary_path}")
 
-    summary_path = os.path.join(save_dir, f"latent_noise_summary_{training_mode}.json")
-    with open(summary_path, "w") as f:
-        json.dump(rat_results, f, indent=2)
-    print(f"Saved summary -> {summary_path}")
-
-    del model
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-```
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 print_summary_table(all_results)
 
 # ============================================================
-
-# OPTIONAL: GLOBAL COMPARISON PLOT
-
+# GLOBAL COMPARISON PLOT
 # ============================================================
+for name in RATS:
+    if name not in all_results:
+        continue
+    if "clean" not in all_results[name] or "adv" not in all_results[name]:
+        continue
 
-for name in rats:
-if name not in all_results:
-continue
-if "clean" not in all_results[name] or "adv" not in all_results[name]:
-continue
+    save_dir = os.path.join(RESULT_DIR, name)
+    os.makedirs(save_dir, exist_ok=True)
 
-```
-save_dir = os.path.join(RESULT_DIR, name)
-os.makedirs(save_dir, exist_ok=True)
+    clean_res = all_results[name]["clean"]
+    adv_res = all_results[name]["adv"]
 
-clean_res = all_results[name]["clean"]
-adv_res = all_results[name]["adv"]
+    noise_levels = [r["noise_level"] for r in clean_res]
 
-noise_levels = [r["noise_level"] for r in clean_res]
+    clean_l2 = [r["latent_mean_l2_mean"] for r in clean_res]
+    adv_l2 = [r["latent_mean_l2_mean"] for r in adv_res]
 
-clean_l2 = [r["latent_mean_l2_mean"] for r in clean_res]
-adv_l2 = [r["latent_mean_l2_mean"] for r in adv_res]
+    clean_cos = [r["latent_cosine_mean"] for r in clean_res]
+    adv_cos = [r["latent_cosine_mean"] for r in adv_res]
 
-clean_cos = [r["latent_cosine_mean"] for r in clean_res]
-adv_cos = [r["latent_cosine_mean"] for r in adv_res]
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
 
-fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+    axs[0].plot(noise_levels, clean_l2, marker="o", label="clean")
+    axs[0].plot(noise_levels, adv_l2, marker="o", label="adv")
+    axs[0].set_title(f"{name} — latent L2 shift")
+    axs[0].set_xlabel("Noise level")
+    axs[0].set_ylabel("Shift")
+    axs[0].legend()
 
-axs[0].plot(noise_levels, clean_l2, marker="o", label="clean")
-axs[0].plot(noise_levels, adv_l2, marker="o", label="adv")
-axs[0].set_title(f"{name} — latent L2 shift")
-axs[0].set_xlabel("Noise level")
-axs[0].set_ylabel("Shift")
-axs[0].legend()
+    axs[1].plot(noise_levels, clean_cos, marker="o", label="clean")
+    axs[1].plot(noise_levels, adv_cos, marker="o", label="adv")
+    axs[1].set_title(f"{name} — latent cosine similarity")
+    axs[1].set_xlabel("Noise level")
+    axs[1].set_ylabel("Cosine")
+    axs[1].legend()
 
-axs[1].plot(noise_levels, clean_cos, marker="o", label="clean")
-axs[1].plot(noise_levels, adv_cos, marker="o", label="adv")
-axs[1].set_title(f"{name} — latent cosine similarity")
-axs[1].set_xlabel("Noise level")
-axs[1].set_ylabel("Cosine")
-axs[1].legend()
-
-plt.tight_layout()
-out_path = os.path.join(save_dir, "clean_vs_adv_latent_noise_compare.png")
-plt.savefig(out_path, dpi=300)
-plt.close()
-print(f"Saved compare plot -> {out_path}")
-```
+    plt.tight_layout()
+    out_path = os.path.join(save_dir, "clean_vs_adv_latent_noise_compare.png")
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+    print(f"Saved compare plot -> {out_path}")
 
 print("Finished.")
 
