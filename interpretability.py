@@ -19,8 +19,8 @@ RESULT_DIR = "results_latent_noise"
 
 RATS = [
     # "achilles",
-    "buddy",
-    # "cicero",
+    # "buddy",
+    "cicero",
     # "gatsby",
 ]
 
