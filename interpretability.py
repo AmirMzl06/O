@@ -20,8 +20,8 @@ RESULT_DIR = "results_latent_noise"
 RATS = [
     # "achilles",
     # "buddy",
-    "cicero",
-    # "gatsby",
+    # "cicero",
+    "gatsby",
 ]
 
 ADV_EPSILON = 0.1
