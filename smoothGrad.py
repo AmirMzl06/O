@@ -434,7 +434,7 @@ for training_mode in ["clean", "adversarial"]:
 
         if rat_name not in all_results:
             all_results[rat_name] = {}
-        all_results[rat_name][mode] = {
+        all_results[rat_name][model] = {
             "raw": {
                 "stats": raw_stats,
                 "feature_importance": raw_importance.tolist(),
