@@ -19,7 +19,7 @@ RESULT_DIR = "results_smoothgrad_fake_neurons"
 
 RATS = [
     "achilles",
-    "buddy",
+    # "buddy",
     # "cicero",
     # "gatsby",
 ]
@@ -35,8 +35,8 @@ N_FAKE = 10
 FAKE_RNG_SEED = 0
 
 # SmoothGrad settings
-N_SMOOTHGRAD_SAMPLES = 25
-SMOOTHGRAD_NOISE_SCALE = 0.10  # multiplied by per-neuron std from the augmented train set
+N_SMOOTHGRAD_SAMPLES = 50
+SMOOTHGRAD_NOISE_SCALE = 0.90  # multiplied by per-neuron std from the augmented train set
 SMOOTHGRAD_CLIP_MIN = 0.0
 
 os.makedirs(RESULT_DIR, exist_ok=True)
@@ -402,7 +402,7 @@ for training_mode in ["clean", "adversarial"]:
             adv_steps=10,
             attack_norm="l2",
             jacobian_weight=0,
-            adv_aggregate=False,
+            adv_aggregate=True,
         )
         model.fit(train_data_aug, train_label)
 
