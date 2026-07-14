@@ -432,46 +432,7 @@ for training_mode in ["clean", "adversarial"]:
             f"fake_share={std_stats['fake_share_of_total']:.4f}"
         )
 
-        if rat_name not in all_results:
-            all_results[rat_name] = {}
-        all_results[rat_name][model] = {
-            "raw": {
-                "stats": raw_stats,
-                "feature_importance": raw_importance.tolist(),
-            },
-            "standardized": {
-                "stats": std_stats,
-                "feature_importance": std_importance.tolist(),
-            },
-            "fake_positions": fake_positions.tolist(),
-        }
-
-        summary_path = os.path.join(save_dir, f"smoothgrad_summary_{training_mode}.json")
-        with open(summary_path, "w") as f:
-            json.dump(all_results[rat_name]["clean" if training_mode == "clean" else "adv"], f, indent=2)
-        print(f"Saved summary -> {summary_path}")
-
         del model
         del torch_model
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-
-print_summary(all_results)
-
-# ============================================================
-# CLEAN VS ADV COMPARISON
-# ============================================================
-for rat_name in RATS:
-    if rat_name not in all_results:
-        continue
-    if "clean" not in all_results[rat_name] or "adv" not in all_results[rat_name]:
-        continue
-
-    save_global_compare_plot(
-        rat=rat_name,
-        clean_stats=all_results[rat_name]["clean"]["stats"],
-        adv_stats=all_results[rat_name]["adv"]["stats"],
-        save_dir=os.path.join(RESULT_DIR, rat_name),
-    )
-
-print("Finished.")
