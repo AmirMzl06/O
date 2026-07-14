@@ -36,9 +36,8 @@ FAKE_RNG_SEED = 0
 
 # SmoothGrad settings
 N_SMOOTHGRAD_SAMPLES = 25
-SMOOTHGRAD_NOISE_SCALE = 0.10  # multiply by dataset std
+SMOOTHGRAD_NOISE_SCALE = 0.10  # multiplied by per-neuron std from the augmented train set
 SMOOTHGRAD_CLIP_MIN = 0.0
-SMOOTHGRAD_BATCH_SIZE = 512
 
 os.makedirs(RESULT_DIR, exist_ok=True)
 
@@ -174,64 +173,66 @@ def get_torch_model(model):
     return torch_model
 
 
-def get_latent(model, data_np):
-    z = model.transform(data_np)
-    return np.asarray(z, dtype=np.float32)
-
-
-def smoothgrad_attribution_map(
+def smoothgrad_feature_importance(
     torch_model,
     input_np,
     feature_scale,
     n_samples=N_SMOOTHGRAD_SAMPLES,
     noise_scale=SMOOTHGRAD_NOISE_SCALE,
-    batch_size=SMOOTHGRAD_BATCH_SIZE,
     clip_min=SMOOTHGRAD_CLIP_MIN,
 ):
-    """SmoothGrad on the latent-space energy.
+    """SmoothGrad-style attribution on a single long test sequence.
 
-    We explain the model output via a scalar score:
-        score = sum_k latent_k^2
+    input_np is expected to be shape [T, N]. We convert it to [1, N, T]
+    because the CEBRA model here expects channels = neurons.
 
-    The returned map has shape (T, N_features) and is the mean absolute gradient
-    over noisy copies of the same input.
+    We use a scalar score = sum(latent^2) so that all latent dimensions
+    contribute to the gradient.
+
+    Returns
+    -------
+    avg_abs_grad : np.ndarray, shape [1, N, T]
+    feature_importance : np.ndarray, shape [N]
+        Mean absolute gradient per neuron, averaged over time.
     """
-    x = torch.tensor(input_np, dtype=torch.float32, device=device)
-    feature_scale_t = torch.tensor(feature_scale, dtype=torch.float32, device=device)
-    if feature_scale_t.ndim == 0:
-        feature_scale_t = feature_scale_t.view(1, 1)
-    elif feature_scale_t.ndim == 1:
-        feature_scale_t = feature_scale_t.view(1, -1)
+    # [T, N] -> [1, N, T]
+    x = torch.tensor(input_np.T[None, :, :], dtype=torch.float32, device=device)
 
-    total_abs_grad = np.zeros_like(input_np, dtype=np.float32)
+    scale = torch.as_tensor(feature_scale, dtype=torch.float32, device=device)
+    if scale.ndim == 0:
+        scale = scale.view(1, 1, 1)
+    elif scale.ndim == 1:
+        # per-neuron std: [N] -> [1, N, 1]
+        scale = scale.view(1, -1, 1)
+    elif scale.ndim == 2:
+        # [1, N] -> [1, N, 1]
+        scale = scale.view(1, scale.shape[1], 1)
+    else:
+        raise ValueError(f"Unsupported feature_scale shape: {tuple(scale.shape)}")
 
-    n_total = x.shape[0]
-    for s in range(n_samples):
-        sample_abs_grad = np.zeros_like(input_np, dtype=np.float32)
+    total_abs_grad = torch.zeros_like(x)
 
-        for start in range(0, n_total, batch_size):
-            end = min(start + batch_size, n_total)
-            batch = x[start:end]
+    for _ in range(n_samples):
+        noise = torch.randn_like(x) * (noise_scale * scale)
+        noisy_x = x + noise
 
-            noise = torch.randn_like(batch) * (noise_scale * feature_scale_t)
-            noisy_batch = batch + noise
-            if clip_min is not None:
-                noisy_batch = torch.clamp(noisy_batch, min=clip_min)
+        if clip_min is not None:
+            noisy_x = torch.clamp(noisy_x, min=clip_min)
 
-            noisy_batch.requires_grad_(True)
-            latent = torch_model(noisy_batch)
+        noisy_x = noisy_x.detach().requires_grad_(True)
+        latent = torch_model(noisy_x)
 
-            # A scalar score per batch. Using latent energy keeps all latent dims involved.
-            score = (latent ** 2).sum(dim=1).mean()
+        # One scalar score for attribution.
+        score = (latent ** 2).sum()
 
-            grad = torch.autograd.grad(score, noisy_batch, retain_graph=False, create_graph=False)[0]
-            sample_abs_grad[start:end] = grad.abs().detach().cpu().numpy()
-
-        total_abs_grad += sample_abs_grad
+        grad = torch.autograd.grad(score, noisy_x, retain_graph=False, create_graph=False)[0]
+        total_abs_grad += grad.abs().detach()
 
     avg_abs_grad = total_abs_grad / float(n_samples)
-    feature_importance = avg_abs_grad.mean(axis=0)
-    return avg_abs_grad, feature_importance
+
+    # Mean over time dimension -> importance per neuron/channel.
+    feature_importance = avg_abs_grad.squeeze(0).mean(dim=1).cpu().numpy()
+    return avg_abs_grad.cpu().numpy(), feature_importance
 
 
 def importance_stats(feature_importance, fake_positions):
@@ -379,11 +380,12 @@ for training_mode in ["clean", "adversarial"]:
         else:
             print("No fake neurons.")
 
-        # Stats for fake-neuron generation and SmoothGrad noise.
-        # This uses the real training set distribution as requested.
-        data_mu = float(train_data.mean())
-        data_sigma = float(train_data.std() + 1e-6)
-        print(f"Dataset Gaussian for fake neurons: mu={data_mu:.6f}, sigma={data_sigma:.6f}")
+        # Per-neuron scale for SmoothGrad noise, computed from the augmented train set.
+        train_feature_scale = train_data_aug.std(axis=0, keepdims=True).astype(np.float32) + 1e-6
+        print(
+            "Dataset Gaussian scale (for fake neurons + SmoothGrad): "
+            f"mean={float(train_data_aug.mean()):.6f}, std_mean={float(train_feature_scale.mean()):.6f}"
+        )
 
         setup_seed(0)
         model = CEBRA(
@@ -399,34 +401,27 @@ for training_mode in ["clean", "adversarial"]:
             adv_epsilon=ADV_EPSILON,
             adv_steps=10,
             attack_norm="l2",
-            jacobian_weight=0.01,
-            adv_aggregate=True,
+            jacobian_weight=0,
+            adv_aggregate=False,
         )
         model.fit(train_data_aug, train_label)
 
         torch_model = get_torch_model(model)
 
         # SmoothGrad on the TEST set with fake neurons included.
-        # We measure how much attention the model gives to the fake channels.
         save_dir = os.path.join(RESULT_DIR, rat_name, training_mode)
         os.makedirs(save_dir, exist_ok=True)
 
-        feature_importance_runs = []
-        for rep in range(N_SMOOTHGRAD_SAMPLES):
-            # Each repetition uses its own random noise samples inside the function.
-            _, feature_importance = smoothgrad_attribution_map(
-                torch_model=torch_model,
-                input_np=test_data_aug,
-                feature_scale=data_sigma,  # scalar Gaussian noise scale from dataset
-                n_samples=1,
-                noise_scale=SMOOTHGRAD_NOISE_SCALE,
-                batch_size=SMOOTHGRAD_BATCH_SIZE,
-                clip_min=SMOOTHGRAD_CLIP_MIN,
-            )
-            feature_importance_runs.append(feature_importance)
+        _, feature_importance = smoothgrad_feature_importance(
+            torch_model=torch_model,
+            input_np=test_data_aug,
+            feature_scale=train_feature_scale,
+            n_samples=N_SMOOTHGRAD_SAMPLES,
+            noise_scale=SMOOTHGRAD_NOISE_SCALE,
+            clip_min=SMOOTHGRAD_CLIP_MIN,
+        )
 
-        feature_importance_mean = np.mean(feature_importance_runs, axis=0)
-        stats = importance_stats(feature_importance_mean, fake_positions)
+        stats = importance_stats(feature_importance, fake_positions)
 
         print(
             f"{rat_name} | {training_mode} | "
@@ -439,7 +434,7 @@ for training_mode in ["clean", "adversarial"]:
         save_feature_importance_plot(
             rat=rat_name,
             mode=training_mode,
-            feature_importance=feature_importance_mean,
+            feature_importance=feature_importance,
             fake_positions=fake_positions,
             save_dir=save_dir,
         )
@@ -449,7 +444,7 @@ for training_mode in ["clean", "adversarial"]:
         all_results[rat_name]["clean" if training_mode == "clean" else "adv"] = {
             "stats": stats,
             "fake_positions": fake_positions.tolist(),
-            "feature_importance": feature_importance_mean.tolist(),
+            "feature_importance": feature_importance.tolist(),
         }
 
         summary_path = os.path.join(save_dir, f"smoothgrad_summary_{training_mode}.json")
