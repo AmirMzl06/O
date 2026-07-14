@@ -1,0 +1,483 @@
+import sys
+import os
+import shutil
+import subprocess
+import random
+import json
+
+import joblib
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+
+# ============================================================
+# CONFIG
+# ============================================================
+REPO_DIR = "CEBRA"
+DATASET_DIR = "dataset"
+RESULT_DIR = "results_smoothgrad_fake_neurons"
+
+RATS = [
+    "achilles",
+    "buddy",
+    "cicero",
+    "gatsby",
+]
+
+# CEBRA settings
+ADV_EPSILON = 0.1
+MAX_ITER = 1500
+OUTPUT_DIM = 48
+BATCH_SIZE = 2048
+
+# Fake neurons
+N_FAKE = 10
+FAKE_RNG_SEED = 0
+
+# SmoothGrad settings
+N_SMOOTHGRAD_SAMPLES = 25
+SMOOTHGRAD_NOISE_SCALE = 0.10  # multiply by dataset std
+SMOOTHGRAD_CLIP_MIN = 0.0
+SMOOTHGRAD_BATCH_SIZE = 512
+
+os.makedirs(RESULT_DIR, exist_ok=True)
+
+# ============================================================
+# PATCH CEBRA
+# ============================================================
+if not os.path.exists(REPO_DIR):
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "https://github.com/AdaptiveMotorControlLab/CEBRA.git",
+        ],
+        check=True,
+    )
+
+# These two files are from your local patched version.
+# Keep them if you already have your patched CEBRA wrappers.
+shutil.copy(
+    "base.py",
+    os.path.join(REPO_DIR, "cebra/solver/base.py"),
+)
+shutil.copy(
+    "cebra.py",
+    os.path.join(REPO_DIR, "cebra/integrations/sklearn/cebra.py"),
+)
+shutil.copy(
+    "cebra.py",
+    os.path.join(REPO_DIR, "cebra/cebra.py"),
+)
+
+base_path = os.path.join(REPO_DIR, "cebra/solver/base.py")
+with open(base_path, "r") as f:
+    content = f.read()
+
+if "AuxiliaryVariableSolver" not in content:
+    with open(base_path, "a") as f:
+        f.write("\nclass AuxiliaryVariableSolver(Solver):\n    pass\n")
+        f.write("\nclass DiscreteAuxiliaryVariableSolver(Solver):\n    pass\n")
+
+print("Patch applied.")
+
+sys.path.insert(0, REPO_DIR)
+if "cebra" in sys.modules:
+    del sys.modules["cebra"]
+
+import cebra
+from cebra import CEBRA
+
+print("CEBRA:", cebra.__version__)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Device:", device)
+
+# ============================================================
+# HELPERS
+# ============================================================
+def setup_seed(seed=42):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def load_local_rat_dataset(name, dataset_dir=DATASET_DIR):
+    path = os.path.join(dataset_dir, f"{name}.jl")
+    data = joblib.load(path)
+
+    spikes = data["spikes"].astype(np.float32)
+    position = data["position"].astype(np.float32)
+
+    if position.ndim == 1:
+        position = position[:, None]
+
+    print(f"{name}: spikes={spikes.shape}  position={position.shape}")
+    return spikes, position
+
+
+def insert_fake_at_positions(x, positions, rng, mu, sigma):
+    """Insert fake neurons at the chosen positions.
+
+    x: (T, N_real)
+    positions: fake neuron indices in the augmented space of size N_real + N_FAKE
+    mu/sigma: scalar Gaussian parameters sampled from the real dataset
+    """
+    n_total = x.shape[1] + len(positions)
+    is_fake = np.zeros(n_total, dtype=bool)
+    is_fake[positions] = True
+
+    fake_values = rng.normal(
+        loc=mu,
+        scale=sigma,
+        size=(x.shape[0], len(positions)),
+    ).astype(np.float32)
+
+    combined = np.zeros((x.shape[0], n_total), dtype=np.float32)
+    combined[:, is_fake] = fake_values
+    combined[:, ~is_fake] = x
+    return combined
+
+
+def add_fake_neurons(train_data, test_data, n_fake=N_FAKE, seed=FAKE_RNG_SEED):
+    """Add Gaussian fake neurons to both train and test with same positions."""
+    if n_fake == 0:
+        return train_data, test_data, np.array([], dtype=int)
+
+    rng = np.random.default_rng(seed)
+    n_real = train_data.shape[1]
+
+    positions = np.sort(
+        rng.choice(
+            n_real + n_fake,
+            size=n_fake,
+            replace=False,
+        )
+    )
+
+    mu = float(train_data.mean())
+    sigma = float(train_data.std() + 1e-6)
+
+    train_data_aug = insert_fake_at_positions(train_data, positions, rng, mu, sigma)
+    test_data_aug = insert_fake_at_positions(test_data, positions, rng, mu, sigma)
+    return train_data_aug, test_data_aug, positions
+
+
+def get_torch_model(model):
+    torch_model = model.solver_.model
+    torch_model.split_outputs = False
+    torch_model.to(device)
+    torch_model.eval()
+    for p in torch_model.parameters():
+        p.requires_grad_(False)
+    return torch_model
+
+
+def get_latent(model, data_np):
+    z = model.transform(data_np)
+    return np.asarray(z, dtype=np.float32)
+
+
+def smoothgrad_attribution_map(
+    torch_model,
+    input_np,
+    feature_scale,
+    n_samples=N_SMOOTHGRAD_SAMPLES,
+    noise_scale=SMOOTHGRAD_NOISE_SCALE,
+    batch_size=SMOOTHGRAD_BATCH_SIZE,
+    clip_min=SMOOTHGRAD_CLIP_MIN,
+):
+    """SmoothGrad on the latent-space energy.
+
+    We explain the model output via a scalar score:
+        score = sum_k latent_k^2
+
+    The returned map has shape (T, N_features) and is the mean absolute gradient
+    over noisy copies of the same input.
+    """
+    x = torch.tensor(input_np, dtype=torch.float32, device=device)
+    feature_scale_t = torch.tensor(feature_scale, dtype=torch.float32, device=device)
+    if feature_scale_t.ndim == 0:
+        feature_scale_t = feature_scale_t.view(1, 1)
+    elif feature_scale_t.ndim == 1:
+        feature_scale_t = feature_scale_t.view(1, -1)
+
+    total_abs_grad = np.zeros_like(input_np, dtype=np.float32)
+
+    n_total = x.shape[0]
+    for s in range(n_samples):
+        sample_abs_grad = np.zeros_like(input_np, dtype=np.float32)
+
+        for start in range(0, n_total, batch_size):
+            end = min(start + batch_size, n_total)
+            batch = x[start:end]
+
+            noise = torch.randn_like(batch) * (noise_scale * feature_scale_t)
+            noisy_batch = batch + noise
+            if clip_min is not None:
+                noisy_batch = torch.clamp(noisy_batch, min=clip_min)
+
+            noisy_batch.requires_grad_(True)
+            latent = torch_model(noisy_batch)
+
+            # A scalar score per batch. Using latent energy keeps all latent dims involved.
+            score = (latent ** 2).sum(dim=1).mean()
+
+            grad = torch.autograd.grad(score, noisy_batch, retain_graph=False, create_graph=False)[0]
+            sample_abs_grad[start:end] = grad.abs().detach().cpu().numpy()
+
+        total_abs_grad += sample_abs_grad
+
+    avg_abs_grad = total_abs_grad / float(n_samples)
+    feature_importance = avg_abs_grad.mean(axis=0)
+    return avg_abs_grad, feature_importance
+
+
+def importance_stats(feature_importance, fake_positions):
+    n_features = len(feature_importance)
+    all_idx = np.arange(n_features)
+    fake_positions = np.asarray(fake_positions, dtype=int)
+    real_positions = np.setdiff1d(all_idx, fake_positions, assume_unique=False)
+
+    fake_vals = feature_importance[fake_positions] if len(fake_positions) > 0 else np.array([])
+    real_vals = feature_importance[real_positions] if len(real_positions) > 0 else np.array([])
+
+    fake_mean = float(fake_vals.mean()) if len(fake_vals) > 0 else np.nan
+    real_mean = float(real_vals.mean()) if len(real_vals) > 0 else np.nan
+    fake_sum = float(fake_vals.sum()) if len(fake_vals) > 0 else 0.0
+    total_sum = float(feature_importance.sum()) + 1e-12
+
+    return {
+        "fake_mean": fake_mean,
+        "real_mean": real_mean,
+        "fake_to_real_ratio": float(fake_mean / (real_mean + 1e-12)) if np.isfinite(fake_mean) and np.isfinite(real_mean) else np.nan,
+        "fake_share_of_total": float(fake_sum / total_sum),
+        "n_fake": int(len(fake_positions)),
+        "n_real": int(len(real_positions)),
+    }
+
+
+def save_feature_importance_plot(rat, mode, feature_importance, fake_positions, save_dir):
+    os.makedirs(save_dir, exist_ok=True)
+
+    plt.figure(figsize=(14, 4.5))
+    plt.plot(feature_importance, linewidth=1.2)
+    for f in fake_positions:
+        plt.axvline(f, color="red", linestyle="--", linewidth=0.8)
+    plt.title(f"{rat} — {mode} — SmoothGrad feature importance")
+    plt.xlabel("Neuron index (including fakes)")
+    plt.ylabel("Mean |gradient|")
+    plt.tight_layout()
+    out_path = os.path.join(save_dir, f"smoothgrad_importance_{mode}.png")
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+    print(f"Saved plot -> {out_path}")
+
+    if len(fake_positions) > 0:
+        fake_vals = feature_importance[fake_positions]
+        real_positions = np.setdiff1d(np.arange(len(feature_importance)), fake_positions)
+        real_vals = feature_importance[real_positions]
+
+        plt.figure(figsize=(6, 4.5))
+        plt.bar([0, 1], [real_vals.mean(), fake_vals.mean()], tick_label=["real", "fake"])
+        plt.title(f"{rat} — {mode} — mean attribution")
+        plt.ylabel("Mean |gradient|")
+        plt.tight_layout()
+        out_path = os.path.join(save_dir, f"smoothgrad_real_vs_fake_{mode}.png")
+        plt.savefig(out_path, dpi=300)
+        plt.close()
+        print(f"Saved plot -> {out_path}")
+
+
+def print_summary(all_results):
+    print()
+    print("=" * 96)
+    print("SMOOTHGRAD FAKE-NEURON SUMMARY")
+    print("=" * 96)
+    for rat, rat_res in all_results.items():
+        print(f"\n{rat}")
+        for mode in ["clean", "adv"]:
+            if mode not in rat_res:
+                continue
+            s = rat_res[mode]["stats"]
+            print(
+                f"  {mode:4s} | "
+                f"fake_mean={s['fake_mean']:.6f} | "
+                f"real_mean={s['real_mean']:.6f} | "
+                f"fake/real={s['fake_to_real_ratio']:.4f} | "
+                f"fake_share={s['fake_share_of_total']:.4f}"
+            )
+    print("=" * 96)
+    print()
+
+
+def save_global_compare_plot(rat, clean_stats, adv_stats, save_dir):
+    os.makedirs(save_dir, exist_ok=True)
+    labels = ["fake_mean", "real_mean", "fake/real", "fake_share"]
+
+    clean_vals = [
+        clean_stats["fake_mean"],
+        clean_stats["real_mean"],
+        clean_stats["fake_to_real_ratio"],
+        clean_stats["fake_share_of_total"],
+    ]
+    adv_vals = [
+        adv_stats["fake_mean"],
+        adv_stats["real_mean"],
+        adv_stats["fake_to_real_ratio"],
+        adv_stats["fake_share_of_total"],
+    ]
+
+    x = np.arange(len(labels))
+    width = 0.35
+
+    plt.figure(figsize=(10, 4.8))
+    plt.bar(x - width / 2, clean_vals, width, label="clean")
+    plt.bar(x + width / 2, adv_vals, width, label="adv")
+    plt.xticks(x, labels)
+    plt.ylabel("Value")
+    plt.title(f"{rat} — Clean vs Adv SmoothGrad summary")
+    plt.legend()
+    plt.tight_layout()
+    out_path = os.path.join(save_dir, "clean_vs_adv_summary.png")
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+    print(f"Saved plot -> {out_path}")
+
+
+# ============================================================
+# MAIN PIPELINE
+# ============================================================
+all_results = {}
+
+for training_mode in ["clean", "adversarial"]:
+    print("=" * 80)
+    print(training_mode.upper())
+    print("=" * 80)
+
+    for rat_name in RATS:
+        print(f"\nTraining {rat_name} ...")
+
+        spikes, position = load_local_rat_dataset(rat_name)
+        split = int(0.8 * len(spikes))
+        train_data = spikes[:split]
+        test_data = spikes[split:]
+        train_label = position[:split, :2]
+        test_label = position[split:, :2]
+
+        # Add fake neurons to both train and test, same positions.
+        train_data_aug, test_data_aug, fake_positions = add_fake_neurons(
+            train_data,
+            test_data,
+            n_fake=N_FAKE,
+            seed=FAKE_RNG_SEED,
+        )
+
+        if len(fake_positions) > 0:
+            print("Fake neuron positions:", fake_positions)
+        else:
+            print("No fake neurons.")
+
+        # Stats for fake-neuron generation and SmoothGrad noise.
+        # This uses the real training set distribution as requested.
+        data_mu = float(train_data.mean())
+        data_sigma = float(train_data.std() + 1e-6)
+        print(f"Dataset Gaussian for fake neurons: mu={data_mu:.6f}, sigma={data_sigma:.6f}")
+
+        setup_seed(0)
+        model = CEBRA(
+            batch_size=BATCH_SIZE,
+            temperature=0.4,
+            model_architecture="offset36-model-more-dropout",
+            time_offsets=4,
+            max_iterations=MAX_ITER,
+            output_dimension=OUTPUT_DIM,
+            verbose=True,
+            training_mode=training_mode,
+            adv_alpha=ADV_EPSILON / 5,
+            adv_epsilon=ADV_EPSILON,
+            adv_steps=10,
+            attack_norm="l2",
+            jacobian_weight=0.01,
+            adv_aggregate=True,
+        )
+        model.fit(train_data_aug, train_label)
+
+        torch_model = get_torch_model(model)
+
+        # SmoothGrad on the TEST set with fake neurons included.
+        # We measure how much attention the model gives to the fake channels.
+        save_dir = os.path.join(RESULT_DIR, rat_name, training_mode)
+        os.makedirs(save_dir, exist_ok=True)
+
+        feature_importance_runs = []
+        for rep in range(N_SMOOTHGRAD_SAMPLES):
+            # Each repetition uses its own random noise samples inside the function.
+            _, feature_importance = smoothgrad_attribution_map(
+                torch_model=torch_model,
+                input_np=test_data_aug,
+                feature_scale=data_sigma,  # scalar Gaussian noise scale from dataset
+                n_samples=1,
+                noise_scale=SMOOTHGRAD_NOISE_SCALE,
+                batch_size=SMOOTHGRAD_BATCH_SIZE,
+                clip_min=SMOOTHGRAD_CLIP_MIN,
+            )
+            feature_importance_runs.append(feature_importance)
+
+        feature_importance_mean = np.mean(feature_importance_runs, axis=0)
+        stats = importance_stats(feature_importance_mean, fake_positions)
+
+        print(
+            f"{rat_name} | {training_mode} | "
+            f"fake_mean={stats['fake_mean']:.6f} | "
+            f"real_mean={stats['real_mean']:.6f} | "
+            f"fake/real={stats['fake_to_real_ratio']:.4f} | "
+            f"fake_share={stats['fake_share_of_total']:.4f}"
+        )
+
+        save_feature_importance_plot(
+            rat=rat_name,
+            mode=training_mode,
+            feature_importance=feature_importance_mean,
+            fake_positions=fake_positions,
+            save_dir=save_dir,
+        )
+
+        if rat_name not in all_results:
+            all_results[rat_name] = {}
+        all_results[rat_name]["clean" if training_mode == "clean" else "adv"] = {
+            "stats": stats,
+            "fake_positions": fake_positions.tolist(),
+            "feature_importance": feature_importance_mean.tolist(),
+        }
+
+        summary_path = os.path.join(save_dir, f"smoothgrad_summary_{training_mode}.json")
+        with open(summary_path, "w") as f:
+            json.dump(all_results[rat_name]["clean" if training_mode == "clean" else "adv"], f, indent=2)
+        print(f"Saved summary -> {summary_path}")
+
+        del model
+        del torch_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+print_summary(all_results)
+
+# ============================================================
+# CLEAN VS ADV COMPARISON
+# ============================================================
+for rat_name in RATS:
+    if rat_name not in all_results:
+        continue
+    if "clean" not in all_results[rat_name] or "adv" not in all_results[rat_name]:
+        continue
+
+    save_global_compare_plot(
+        rat=rat_name,
+        clean_stats=all_results[rat_name]["clean"]["stats"],
+        adv_stats=all_results[rat_name]["adv"]["stats"],
+        save_dir=os.path.join(RESULT_DIR, rat_name),
+    )
+
+print("Finished.")
