@@ -181,36 +181,24 @@ def smoothgrad_feature_importance(
     noise_scale=SMOOTHGRAD_NOISE_SCALE,
     clip_min=SMOOTHGRAD_CLIP_MIN,
 ):
-    """SmoothGrad-style attribution on a single long test sequence.
-
-    input_np is expected to be shape [T, N]. We convert it to [1, N, T]
-    because the CEBRA model here expects channels = neurons.
-
-    We use a scalar score = sum(latent^2) so that all latent dimensions
-    contribute to the gradient.
-
-    Returns
-    -------
-    avg_abs_grad : np.ndarray, shape [1, N, T]
-    feature_importance : np.ndarray, shape [N]
-        Mean absolute gradient per neuron, averaged over time.
     """
-    # [T, N] -> [1, N, T]
+    input_np: [T, N]
+    model input: [1, N, T]
+    """
     x = torch.tensor(input_np.T[None, :, :], dtype=torch.float32, device=device)
 
     scale = torch.as_tensor(feature_scale, dtype=torch.float32, device=device)
     if scale.ndim == 0:
         scale = scale.view(1, 1, 1)
     elif scale.ndim == 1:
-        # per-neuron std: [N] -> [1, N, 1]
         scale = scale.view(1, -1, 1)
     elif scale.ndim == 2:
-        # [1, N] -> [1, N, 1]
         scale = scale.view(1, scale.shape[1], 1)
     else:
         raise ValueError(f"Unsupported feature_scale shape: {tuple(scale.shape)}")
 
-    total_abs_grad = torch.zeros_like(x)
+    total_raw = torch.zeros_like(x)
+    total_std = torch.zeros_like(x)
 
     for _ in range(n_samples):
         noise = torch.randn_like(x) * (noise_scale * scale)
@@ -220,20 +208,22 @@ def smoothgrad_feature_importance(
             noisy_x = torch.clamp(noisy_x, min=clip_min)
 
         noisy_x = noisy_x.detach().requires_grad_(True)
-        latent = torch_model(noisy_x)
 
-        # One scalar score for attribution.
+        latent = torch_model(noisy_x)
         score = (latent ** 2).sum()
 
         grad = torch.autograd.grad(score, noisy_x, retain_graph=False, create_graph=False)[0]
-        total_abs_grad += grad.abs().detach()
 
-    avg_abs_grad = total_abs_grad / float(n_samples)
+        total_raw += grad.abs().detach()
+        total_std += (grad * scale).abs().detach()   # standardized importance
 
-    # Mean over time dimension -> importance per neuron/channel.
-    feature_importance = avg_abs_grad.squeeze(0).mean(dim=1).cpu().numpy()
-    return avg_abs_grad.cpu().numpy(), feature_importance
+    avg_raw = total_raw / float(n_samples)
+    avg_std = total_std / float(n_samples)
 
+    raw_feature_importance = avg_raw.squeeze(0).mean(dim=1).cpu().numpy()
+    std_feature_importance = avg_std.squeeze(0).mean(dim=1).cpu().numpy()
+
+    return avg_raw.cpu().numpy(), raw_feature_importance, std_feature_importance
 
 def importance_stats(feature_importance, fake_positions):
     n_features = len(feature_importance)
