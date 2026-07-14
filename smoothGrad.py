@@ -391,7 +391,7 @@ for training_mode in ["clean", "adversarial"]:
             adv_epsilon=ADV_EPSILON,
             adv_steps=10,
             attack_norm="l2",
-            jacobian_weight=0,
+            jacobian_weight=0.5,
             adv_aggregate=False,
         )
         model.fit(train_data_aug, train_label)
