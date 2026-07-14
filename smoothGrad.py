@@ -20,8 +20,8 @@ RESULT_DIR = "results_smoothgrad_fake_neurons"
 RATS = [
     "achilles",
     "buddy",
-    "cicero",
-    "gatsby",
+    # "cicero",
+    # "gatsby",
 ]
 
 # CEBRA settings
