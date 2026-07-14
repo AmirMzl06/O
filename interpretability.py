@@ -1059,7 +1059,7 @@ RESULT_DIR   = "results_monkey_recon"
 REPO_DIR     = "CEBRA"
 
 N_FAKE       = 0
-adv_epsilon  = 0.1
+adv_epsilon  = 0.5
 MAX_ITER     = 1500
 OUTPUT_DIM   = 48
 BATCH_SIZE   = 512
@@ -1422,7 +1422,7 @@ for SESSION_FILE in sessions:
             adv_epsilon=adv_epsilon,
             adv_steps=10,
             attack_norm="l2",
-            jacobian_weight=0.5,
+            jacobian_weight=0,
             adv_aggregate=False,
         )
 
