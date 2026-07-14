@@ -392,7 +392,7 @@ for training_mode in ["clean", "adversarial"]:
             adv_steps=10,
             attack_norm="l2",
             jacobian_weight=0,
-            adv_aggregate=True,
+            adv_aggregate=False,
         )
         model.fit(train_data_aug, train_label)
 
@@ -402,7 +402,7 @@ for training_mode in ["clean", "adversarial"]:
         save_dir = os.path.join(RESULT_DIR, rat_name, training_mode)
         os.makedirs(save_dir, exist_ok=True)
 
-        _, feature_importance = smoothgrad_feature_importance(
+        _, raw_importance, std_importance = smoothgrad_feature_importance(
             torch_model=torch_model,
             input_np=test_data_aug,
             feature_scale=train_feature_scale,
@@ -411,30 +411,39 @@ for training_mode in ["clean", "adversarial"]:
             clip_min=SMOOTHGRAD_CLIP_MIN,
         )
 
-        stats = importance_stats(feature_importance, fake_positions)
 
+        raw_stats = importance_stats(raw_importance, fake_positions)
+        std_stats = importance_stats(std_importance, fake_positions)
+        
+        
+        print("\nRAW SmoothGrad")
         print(
-            f"{rat_name} | {training_mode} | "
-            f"fake_mean={stats['fake_mean']:.6f} | "
-            f"real_mean={stats['real_mean']:.6f} | "
-            f"fake/real={stats['fake_to_real_ratio']:.4f} | "
-            f"fake_share={stats['fake_share_of_total']:.4f}"
+            f"fake_mean={raw_stats['fake_mean']:.6f} | "
+            f"real_mean={raw_stats['real_mean']:.6f} | "
+            f"fake/real={raw_stats['fake_to_real_ratio']:.4f} | "
+            f"fake_share={raw_stats['fake_share_of_total']:.4f}"
         )
-
-        save_feature_importance_plot(
-            rat=rat_name,
-            mode=training_mode,
-            feature_importance=feature_importance,
-            fake_positions=fake_positions,
-            save_dir=save_dir,
+        
+        print("STANDARDIZED SmoothGrad")
+        print(
+            f"fake_mean={std_stats['fake_mean']:.6f} | "
+            f"real_mean={std_stats['real_mean']:.6f} | "
+            f"fake/real={std_stats['fake_to_real_ratio']:.4f} | "
+            f"fake_share={std_stats['fake_share_of_total']:.4f}"
         )
 
         if rat_name not in all_results:
             all_results[rat_name] = {}
-        all_results[rat_name]["clean" if training_mode == "clean" else "adv"] = {
-            "stats": stats,
+        all_results[rat_name][mode] = {
+            "raw": {
+                "stats": raw_stats,
+                "feature_importance": raw_importance.tolist(),
+            },
+            "standardized": {
+                "stats": std_stats,
+                "feature_importance": std_importance.tolist(),
+            },
             "fake_positions": fake_positions.tolist(),
-            "feature_importance": feature_importance.tolist(),
         }
 
         summary_path = os.path.join(save_dir, f"smoothgrad_summary_{training_mode}.json")
