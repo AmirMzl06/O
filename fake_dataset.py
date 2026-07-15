@@ -351,8 +351,8 @@ def compute_captum_map(
 def compute_all_attributions(torch_model, x_np, gt_bool):
     methods = OrderedDict([
         ("Feature Ablation", ("feature_ablation", "zero")),
-        ("Shapley zeros", ("shapley_zeros", "zero")),
-        ("Shapley shuffled", ("shapley_shuffled", "shuffled")),
+        # ("Shapley zeros", ("shapley_zeros", "zero")),
+        # ("Shapley shuffled", ("shapley_shuffled", "shuffled")),
         ("Integrated Gradients", ("integrated_gradients", "zero")),
         ("Neuron Gradient", ("neuron_gradient", None)),
     ])
