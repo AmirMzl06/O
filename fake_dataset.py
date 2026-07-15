@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from sklearn.metrics import roc_auc_score
-from captum.attr import FeatureAblation, IntegratedGradients, ShapleyValueSampling, NeuronGradient
+from captum.attr import FeatureAblation, IntegratedGradients, ShapleyValueSampling, Saliency
 
 # ============================================================
 # CONFIG
@@ -280,11 +280,12 @@ def compute_captum_map(
     elif method_name in {"shapley_zeros", "shapley_shuffled"}:
         explainer = ShapleyValueSampling(torch_model)
     elif method_name == "neuron_gradient":
-        target_layer = find_target_layer(torch_model)
-        explainer = NeuronGradient(
-            torch_model,
-            target_layer
-        )
+        explainer = Saliency(torch_model)
+        # target_layer = find_target_layer(torch_model)
+        # explainer = NeuronGradient(
+        #     torch_model,
+        #     target_layer
+        # )
     else:
         raise ValueError(f"Unknown method_name: {method_name}")
 
@@ -336,8 +337,8 @@ def compute_captum_map(
             elif method_name == "neuron_gradient":
                 attr = explainer.attribute(
                     xb,
-                    neuron_selector=k,
-                    attribute_to_neuron_input=False,
+                    target=k,
+                    abs=False
                 )
             else:
                 raise ValueError(f"Unknown method_name: {method_name}")
