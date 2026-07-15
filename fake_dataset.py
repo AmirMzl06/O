@@ -169,16 +169,11 @@ class CaptumModelWrapper(nn.Module):
         self.base_model = base_model
 
     def forward(self, x):
-        # Captum sometimes gives [B, T, F]
-        # but this CEBRA conv model expects [B, F, T]
         if x.dim() == 2:
-            # [T, F] -> [1, F, T]
-            x = x.transpose(0, 1).unsqueeze(0)
-
+            x = x.transpose(0, 1).contiguous()
         elif x.dim() == 3:
-            # [B, T, F] -> [B, F, T]
-            if x.shape[1] != 4 and x.shape[-1] == 4:
-                x = x.transpose(1, 2)
+            if x.shape[-1] == D_OBS:
+                x = x.transpose(1, 2).contiguous()
 
         return self.base_model(x)
 
@@ -268,7 +263,7 @@ def compute_captum_map(
     output_dim = getattr(torch_model, "num_output", None)
     if output_dim is None:
         with torch.no_grad():
-            output_dim = int(torch_model(x[:1]).shape[-1])
+            output_dim = OUTPUT_DIM
     else:
         output_dim = int(output_dim)
 
