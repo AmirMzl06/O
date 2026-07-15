@@ -34,7 +34,7 @@ SIGMA_EPS = 0.03
 
 OUTPUT_DIM = D_LATENT
 BATCH_SIZE = 5000
-MAX_ITER = 2000
+MAX_ITER = 20
 adv_epsilon = 0.1
 
 # Attribution hyperparams
