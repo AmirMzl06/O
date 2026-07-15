@@ -189,14 +189,17 @@ def get_torch_model(model):
 # ============================================================
 # ATTRIBUTION HELPERS
 # ============================================================
-def find_last_linear_layer(model: nn.Module) -> nn.Linear:
-    last_linear = None
+def find_target_layer(model):
+    last_conv = None
+
     for m in model.modules():
-        if isinstance(m, nn.Linear):
-            last_linear = m
-    if last_linear is None:
-        raise ValueError("No nn.Linear layer found in the model.")
-    return last_linear
+        if isinstance(m, nn.Conv1d):
+            last_conv = m
+
+    if last_conv is None:
+        raise ValueError("No Conv1d layer found.")
+
+    return last_conv
 
 
 def shuffled_baseline(batch: torch.Tensor, seed: int = 0) -> torch.Tensor:
@@ -277,8 +280,11 @@ def compute_captum_map(
     elif method_name in {"shapley_zeros", "shapley_shuffled"}:
         explainer = ShapleyValueSampling(torch_model)
     elif method_name == "neuron_gradient":
-        last_linear = find_last_linear_layer(torch_model)
-        explainer = NeuronGradient(torch_model, last_linear)
+        target_layer = find_target_layer(torch_model)
+        explainer = NeuronGradient(
+            torch_model,
+            target_layer
+        )
     else:
         raise ValueError(f"Unknown method_name: {method_name}")
 
