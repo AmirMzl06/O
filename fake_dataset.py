@@ -163,12 +163,33 @@ def generate_synthetic_data(T=T, seed=42):
     return x, latent, gt_attr, gt_bool, g1, g2
 
 
+class CaptumModelWrapper(nn.Module):
+    def __init__(self, base_model):
+        super().__init__()
+        self.base_model = base_model
+
+    def forward(self, x):
+        # Captum sometimes gives [B, T, F]
+        # but this CEBRA conv model expects [B, F, T]
+        if x.dim() == 2:
+            # [T, F] -> [1, F, T]
+            x = x.transpose(0, 1).unsqueeze(0)
+
+        elif x.dim() == 3:
+            # [B, T, F] -> [B, F, T]
+            if x.shape[1] != 4 and x.shape[-1] == 4:
+                x = x.transpose(1, 2)
+
+        return self.base_model(x)
+
 def get_torch_model(model):
     torch_model = model.solver_.model
     torch_model.split_outputs = False
     torch_model.to(device)
     torch_model.eval()
-    return torch_model
+
+    wrapped_model = CaptumModelWrapper(torch_model).to(device).eval()
+    return wrapped_model
 
 # ============================================================
 # ATTRIBUTION HELPERS
